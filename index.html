@@ -69,13 +69,23 @@ h1 span { color: var(--stop); }
 .stage { position: relative; }
 .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .stage canvas { touch-action: none; }
-.prompt {
-  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
-  max-width: calc(100% - 24px); text-align: center;
-  background: rgba(0,0,0,.72); color: #fff; padding: 10px 16px; border-radius: 10px;
-  font: 700 20px/1.15 var(--display); letter-spacing: .03em; text-transform: uppercase; pointer-events: none;
+.banner {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 20px);
+  background: var(--stop); color: #fff; padding: 6px 12px; border-radius: 8px; white-space: nowrap;
+  font: 700 14px/1.1 var(--display); letter-spacing: .06em; text-transform: uppercase; pointer-events: none;
 }
-.prompt small { display: block; font: 500 13px/1.3 var(--body); text-transform: none; letter-spacing: 0; opacity: .85; margin-top: 3px; }
+.setupCard { background: var(--surface); border: 2px solid var(--ink); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
+.stepNo { font: 700 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.stepTitle { font: 800 24px/1.05 var(--display); text-transform: uppercase; }
+.stepTitle .s { color: var(--go); } .stepTitle .f { color: var(--stop); }
+.stepSub { margin: 0; font-size: 14px; color: var(--muted); }
+.tip { margin: 0; font-size: 13px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; }
+.lens { display: flex; gap: 6px; align-items: center; }
+.lens span { font-size: 13px; color: var(--muted); margin-right: 2px; }
+.lens button { padding: 8px 12px; font-size: 15px; }
+.lens button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+#testArea { display: grid; gap: 12px; }
+@media (orientation: landscape) { .rotateTip { display: none; } }
 
 .panel {
   display: grid; gap: 12px; align-content: start; overflow-y: auto; max-height: 46vh;
@@ -125,10 +135,15 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .err { color: var(--stop); font-weight: 600; }
 
 @media (orientation: landscape) and (max-height: 560px) {
-  .app { grid-template-rows: auto 1fr; grid-template-columns: 1fr minmax(260px, 34%); }
-  header { grid-column: 1 / -1; padding-block: 6px; }
-  .panel { max-height: none; border-top: 0; border-left: 1px solid var(--line); }
-  .run .time { font-size: 36px; }
+  .app { grid-template-rows: auto 1fr; grid-template-columns: 1fr minmax(230px, 30%); }
+  header { grid-column: 1 / -1; padding-block: 4px; }
+  h1 { font-size: 18px; }
+  .panel { max-height: none; min-height: 0; border-top: 0; border-left: 1px solid var(--line); gap: 10px; padding-block: 8px; }
+  .gates { grid-template-columns: 1fr; gap: 8px; }
+  .gate { padding: 8px 10px; }
+  .run .time { font-size: 34px; }
+  .hint { font-size: 13px; }
+  .stepTitle { font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { .gate.flash { animation: none; } .meter i { transition: none; } }
 </style>
@@ -144,14 +159,14 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     <div class="stage" id="stage">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="overlay"></canvas>
-      <div class="prompt" id="prompt" hidden></div>
+      <div class="banner" id="moveBanner" hidden>Camera moving. Keep the phone still.</div>
     </div>
     <div class="intro" id="intro">
       <div class="card">
         <h2>Gate test</h2>
         <p>This version checks that the camera can see the car cross each gate. No times are saved yet.</p>
         <ol>
-          <li>Mount the phone so it sees both rocks.</li>
+          <li>Mount the phone sideways so it sees both rocks, and keep it still.</li>
           <li>Turn the volume up and the ringer switch on.</li>
           <li>Tap Start camera, then mark the gates.</li>
         </ol>
@@ -162,6 +177,18 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   </div>
 
   <section class="panel" id="panel" hidden>
+    <p class="tip rotateTip">Turn the phone sideways for a bigger picture. If the picture turns but the app does not, swipe down from the top-right corner and turn off Portrait Orientation Lock.</p>
+
+    <div class="setupCard" id="setupCard" hidden>
+      <div class="stepNo" id="stepNo">Step 1 of 4</div>
+      <div class="stepTitle" id="stepTitle"></div>
+      <p class="stepSub" id="stepSub"></p>
+      <div class="row"><button id="undoBtn">Undo tap</button><button id="keepBtn" hidden>Keep old gates</button></div>
+    </div>
+
+    <div class="lens" id="lensRow" hidden><span>Lens</span></div>
+
+    <div id="testArea">
     <div class="gates">
       <div class="gate start" id="gStart">
         <div class="top"><span class="name">START</span><span><span class="count" id="cStart">0</span> <span class="unit">hits</span></span></div>
@@ -191,6 +218,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       <button id="resetBtn">Reset counts</button>
     </div>
     <ul class="log" id="log"></ul>
+    </div>
   </section>
 </div>
 
@@ -198,21 +226,25 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 (() => {
   const $ = id => document.getElementById(id);
   const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
-  const stage = $('stage'), stageWrap = $('stageWrap'), promptEl = $('prompt');
+  const stage = $('stage'), stageWrap = $('stageWrap');
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   };
 
   // ---------- state ----------
-  let gates = store.get('rt.gates', null);      // {start:{a,b}, finish:{a,b}} in 0..1 video coords
+  // Gate lines are kept per picture shape, because iOS turns the camera image when the phone rotates.
+  let gatesBy = store.get('rt.gates2', {});     // {land:{start:{a,b},finish:{a,b}}, port:{...}} in 0..1 video coords
+  let gates = null;
+  const orient = () => (video.videoWidth >= video.videoHeight ? 'land' : 'port');
+  function saveGates(g) { gatesBy[orient()] = g; store.set('rt.gates2', gatesBy); gates = g; }
   let sens = store.get('rt.sens', 5);
   let mode = 'off';                              // off | setup | test
   let setupStep = 0;                             // 0 startA, 1 startB, 2 finishA, 3 finishB
   let draft = {};
   let det = {};                                  // per-gate detector state
   let counts = { start: 0, finish: 0 };
-  let runStartAt = null, liveTimer = null;
+  let runStartAt = null, liveStartAt = 0, liveTimer = null;
   const PROC_W = 320; let PROC_H = 180;
   const proc = document.createElement('canvas');
   const pctx = proc.getContext('2d', { willReadFrequently: true });
@@ -251,17 +283,14 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       err.hidden = false; return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }
-      });
-      video.srcObject = stream;
-      await video.play();
-      await new Promise(r => video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true }));
-      PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth);
-      proc.width = PROC_W; proc.height = PROC_H;
+      await openCamera(null);                          // first open asks permission so lens names become visible
+      await findLenses();
+      const want = lensChoice === '1x' ? lenses.wide : (lenses.ultra || lenses.wide);
+      if (want && want !== currentDeviceId) await openCamera(want);
+      renderLensButtons();
       $('intro').hidden = true; $('panel').hidden = false;
       layout(); keepAwake();
+      gates = gatesBy[orient()] || null; lastOrient = orient();
       if (gates) enterTest(); else enterSetup();
       startLoop();
     } catch (e) {
@@ -272,7 +301,55 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     }
   });
 
+  // ---------- lenses (1x wide, 0.5x ultra wide) ----------
+  let lenses = { wide: null, ultra: null }, currentDeviceId = null;
+  let lensChoice = store.get('rt.lens', '0.5x');
+  async function openCamera(deviceId) {
+    if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+    const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: 'environment' } }
+    });
+    video.srcObject = stream;
+    const track = stream.getVideoTracks()[0];
+    currentDeviceId = (track.getSettings && track.getSettings().deviceId) || deviceId;
+    await video.play();
+    await new Promise(r => video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true }));
+    PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth);
+    proc.width = PROC_W; proc.height = PROC_H;
+  }
+  async function findLenses() {
+    try {
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const back = cams.filter(d => !/front/i.test(d.label));
+      lenses.ultra = (back.find(d => /ultra/i.test(d.label)) || {}).deviceId || null;
+      lenses.wide = (back.find(d => /^back camera$/i.test(d.label.trim())) ||
+                     back.find(d => !/ultra|tele|dual|triple/i.test(d.label)) || {}).deviceId || currentDeviceId;
+    } catch (e) {}
+  }
+  function renderLensButtons() {
+    const row = $('lensRow');
+    row.querySelectorAll('button').forEach(b => b.remove());
+    if (!lenses.ultra) { row.hidden = true; return; }
+    for (const [label, id] of [['0.5x', lenses.ultra], ['1x', lenses.wide]]) {
+      const b = document.createElement('button');
+      b.textContent = label; b.setAttribute('aria-pressed', String(id === currentDeviceId));
+      b.addEventListener('click', async () => {
+        if (id === currentDeviceId) return;
+        lensChoice = label; store.set('rt.lens', label);
+        try { await openCamera(id); } catch (e) { return; }
+        renderLensButtons(); layout();
+        gatesBy = {}; store.set('rt.gates2', gatesBy); gates = null;   // the picture changed, so the gate lines must be redrawn
+        enterSetup();
+      });
+      row.append(b);
+    }
+    row.hidden = false;
+  }
+
   // ---------- layout: fit video inside the stage area, keep aspect ----------
+  let lastOrient = null;
   function layout() {
     if (!video.videoWidth) return;
     const ar = video.videoWidth / video.videoHeight;
@@ -283,34 +360,65 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     const dpr = window.devicePixelRatio || 1;
     overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr);
     octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const o = orient();
+    if (lastOrient && o !== lastOrient && mode !== 'off') {   // phone rotated: camera picture changed shape
+      PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth);
+      proc.width = PROC_W; proc.height = PROC_H;
+      gates = gatesBy[o] || null;
+      gates ? enterTest() : enterSetup();
+    }
+    lastOrient = o;
     draw();
   }
-  window.addEventListener('resize', () => setTimeout(layout, 120));
-  window.addEventListener('orientationchange', () => setTimeout(layout, 300));
+  window.addEventListener('resize', () => setTimeout(layout, 150));
+  window.addEventListener('orientationchange', () => setTimeout(layout, 400));
+  video.addEventListener('resize', () => setTimeout(layout, 50));   // fires when iOS turns the camera image
 
   // ---------- setup (tap rocks) ----------
   const steps = [
-    ['Tap the START rock', 'This is one end of the start line.'],
-    ['Tap the far side of the track', 'This draws the START line across the track.'],
-    ['Tap the FINISH rock', 'This is one end of the finish line.'],
-    ['Tap the far side of the track', 'This draws the FINISH line across the track.']
+    ['s', 'Tap the START rock', 'Tap the rock on the picture above. It is one end of the start line.'],
+    ['s', 'Tap across the track', 'Tap the far side of the track, straight across from the START rock.'],
+    ['f', 'Tap the FINISH rock', 'Tap the rock on the picture. It is one end of the finish line.'],
+    ['f', 'Tap across the track', 'Tap the far side of the track, straight across from the FINISH rock.']
   ];
   function setMode(m) {
     mode = m; const chip = $('modeChip');
     chip.textContent = m === 'setup' ? 'Mark gates' : m === 'test' ? 'Gate test' : 'Off';
     chip.className = 'mode ' + m;
+    $('setupCard').hidden = m !== 'setup';
+    $('testArea').hidden = m !== 'test';
   }
+  let backupGates = null;
   function enterSetup() {
+    backupGates = gates;
     setMode('setup'); setupStep = 0; draft = {}; det = {};
-    showPrompt(); draw();
+    $('keepBtn').hidden = !backupGates;
+    moving = false; $('moveBanner').hidden = true;
+    showStep(); draw();
   }
-  function showPrompt() {
-    if (mode !== 'setup') { promptEl.hidden = true; return; }
-    const [t, s] = steps[setupStep];
-    promptEl.innerHTML = ''; promptEl.append(t);
-    const sm = document.createElement('small'); sm.textContent = s; promptEl.append(sm);
-    promptEl.hidden = false;
+  function showStep() {
+    const [k, t, sub] = steps[setupStep];
+    $('stepNo').textContent = 'Step ' + (setupStep + 1) + ' of 4';
+    const title = $('stepTitle'); title.innerHTML = '';
+    const word = k === 's' ? 'START' : 'FINISH';
+    if (t.includes(word)) {
+      const [pre, post] = t.split(word);
+      const em = document.createElement('span'); em.className = k; em.textContent = word;
+      title.append(pre, em, post);
+    } else title.textContent = t;
+    $('stepSub').textContent = sub;
+    $('undoBtn').disabled = setupStep === 0;
   }
+  $('undoBtn').addEventListener('click', () => {
+    if (setupStep === 0) return;
+    setupStep--;
+    if (setupStep === 0) delete draft.start;
+    else if (setupStep === 1) delete draft.start.b;
+    else if (setupStep === 2) delete draft.finish;
+    else delete draft.finish.b;
+    showStep(); draw();
+  });
+  $('keepBtn').addEventListener('click', () => { if (backupGates) { gates = backupGates; enterTest(); } });
   overlay.addEventListener('pointerdown', e => {
     if (mode !== 'setup') return;
     const r = overlay.getBoundingClientRect();
@@ -321,13 +429,13 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     else draft.finish.b = p;
     beep(990, 0.05);
     setupStep++;
-    if (setupStep > 3) { gates = draft; store.set('rt.gates', gates); enterTest(); }
-    else { showPrompt(); draw(); }
+    if (setupStep > 3) { saveGates(draft); enterTest(); }
+    else { showStep(); draw(); }
   });
 
   // ---------- test mode ----------
   function enterTest() {
-    setMode('test'); promptEl.hidden = true;
+    setMode('test');
     det = { start: buildGate(gates.start), finish: buildGate(gates.finish) };
     updateThresholdMarks(); draw();
     say('Gates set. Drive through each gate to test.');
@@ -404,7 +512,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     let note = '';
     if (name === 'start') {
       beep(1320, 0.14);
-      runStartAt = now; startLive(); note = 'START hit, timing test run';
+      runStartAt = now; liveStartAt = performance.now(); startLive(); note = 'START hit, timing test run';
     } else {
       beep(880, 0.1); beep(1320, 0.16, 0.14);
       if (runStartAt !== null && now - runStartAt > 300) {
@@ -420,24 +528,62 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   }
   function startLive() {
     stopLive(); const el = $('runTime'); el.classList.add('live');
-    liveTimer = setInterval(() => { if (runStartAt !== null) el.textContent = ((performance.now() - runStartAt) / 1000).toFixed(2); }, 50);
+    liveTimer = setInterval(() => { if (runStartAt !== null) el.textContent = ((performance.now() - liveStartAt) / 1000).toFixed(2); }, 50);
   }
   function stopLive() { if (liveTimer) clearInterval(liveTimer); liveTimer = null; $('runTime').classList.remove('live'); }
 
   // ---------- frame loop ----------
   function startLoop() {
     const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
-    const step = (now) => {
-      if (mode === 'test' && video.readyState >= 2) {
+    // Use the camera's own frame time when the browser gives it, so a slow moment on the
+    // phone does not shift a crossing. Fall back to the clock if frame times are missing.
+    let lastMedia = -1, useMedia = null;
+    const step = (clock, meta) => {
+      if (useMedia === null) useMedia = !!(meta && typeof meta.mediaTime === 'number' && meta.mediaTime > 0);
+      let now = clock, fresh = true;
+      if (useMedia) {
+        const mt = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : -1;
+        if (mt < lastMedia - 1) { lastMedia = -1; runStartAt = null; stopLive(); for (const g of Object.values(det)) g.last = -1e9; } // camera restarted
+        fresh = mt > lastMedia; if (fresh) lastMedia = mt;
+        now = lastMedia * 1000;
+      }
+      if (fresh && mode === 'test' && video.readyState >= 2) {
         pctx.drawImage(video, 0, 0, PROC_W, PROC_H);
         const px = pctx.getImageData(0, 0, PROC_W, PROC_H).data;
-        analyse(det.start, px, now, 'start');
-        analyse(det.finish, px, now, 'finish');
+        if (cameraMoving(px, now)) {
+          // Whole picture is shifting: pause the gates and relearn them once the phone is still.
+          det.start.warm = 0; det.finish.warm = 0; det.start.level = 0; det.finish.level = 0;
+          det.start.active = false; det.finish.active = false;
+        } else {
+          analyse(det.start, px, now, 'start');
+          analyse(det.finish, px, now, 'finish');
+        }
         paintMeters(); draw();
       }
       hasRVFC ? video.requestVideoFrameCallback(step) : requestAnimationFrame(step);
     };
     hasRVFC ? video.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+  }
+  // Compare a sparse grid of the whole picture with the last frame. A car changes a small
+  // patch; a moving phone changes most of the picture at once.
+  let moving = false, movingUntil = 0, prevGrid = null, prevLen = 0;
+  function cameraMoving(px, now) {
+    const step = 8, n = Math.floor(PROC_W / step) * Math.floor(PROC_H / step);
+    if (!prevGrid || prevLen !== n) { prevGrid = new Float32Array(n); prevLen = n; }
+    let i = 0, changed = 0;
+    for (let y = step >> 1; y < PROC_H; y += step) for (let x = step >> 1; x < PROC_W; x += step) {
+      if (i >= n) break;
+      const k = (y * PROC_W + x) * 4, v = (px[k] + 2 * px[k + 1] + px[k + 2]) * 0.25;
+      if (Math.abs(v - prevGrid[i]) > 22) changed++;
+      prevGrid[i++] = v;
+    }
+    if (changed / n > 0.25) movingUntil = now + 1200;
+    const m = now < movingUntil;
+    if (m !== moving) {
+      moving = m; $('moveBanner').hidden = !m;
+      if (m) { runStartAt = null; stopLive(); }
+    }
+    return m;
   }
   function paintMeters() {
     for (const [name, m, g] of [['start', 'mStart', 'gStart'], ['finish', 'mFinish', 'gFinish']]) {
