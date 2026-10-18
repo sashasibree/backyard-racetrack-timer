@@ -114,6 +114,8 @@ button.small { padding: 8px 12px; font-size: 14px; border-color: var(--ink); }
 .run .label { font: 700 13px/1.2 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .run .time { font: 800 44px/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
 .run .time.live { color: var(--amber); }
+.run { flex-wrap: wrap; }
+.stopBtn { flex: 1 1 100%; background: var(--stop); border-color: var(--stop); color: #fff; padding: 14px; font-size: 18px; }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .slider { flex: 1 1 200px; display: grid; gap: 4px; }
@@ -208,6 +210,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     <div class="run">
       <span class="label">Test run<br>start to finish</span>
       <span class="time" id="runTime">--.--</span>
+      <button class="stopBtn" id="stopBtn" hidden>Stop timer</button>
     </div>
 
     <p class="hint" id="hint">Drive the car through each gate. You should hear a high beep at START and a double beep at FINISH. The bar shows how much the gate sees; crossing the black mark counts as a hit. To fine-tune a line, drag its dots on the picture.</p>
@@ -562,10 +565,16 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     const log = $('log'); log.prepend(li); while (log.children.length > 6) log.lastChild.remove();
   }
   function startLive() {
-    stopLive(); const el = $('runTime'); el.classList.add('live');
+    stopLive(); const el = $('runTime'); el.classList.add('live'); $('stopBtn').hidden = false;
     liveTimer = setInterval(() => { if (runStartAt !== null) el.textContent = ((performance.now() - liveStartAt) / 1000).toFixed(2); }, 50);
   }
-  function stopLive() { if (liveTimer) clearInterval(liveTimer); liveTimer = null; $('runTime').classList.remove('live'); }
+  function stopLive() { if (liveTimer) clearInterval(liveTimer); liveTimer = null; $('runTime').classList.remove('live'); $('stopBtn').hidden = true; }
+  $('stopBtn').addEventListener('click', () => {
+    runStartAt = null; stopLive(); $('runTime').textContent = '--.--';
+    const li = document.createElement('li');
+    li.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) + '  Timer stopped and cleared';
+    $('log').prepend(li); beep(440, 0.15);
+  });
 
   // ---------- frame loop ----------
   function startLoop() {
