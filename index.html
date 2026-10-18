@@ -43,24 +43,25 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; overflow-x: hidden; }
 body {
   background: var(--bg); color: var(--ink); font: 16px/1.4 var(--body);
   -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
 }
 .app {
-  height: 100%; display: grid; grid-template-rows: auto 1fr auto;
+  height: 100%; display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
-h1 { margin: 0; font: 800 22px/1 var(--display); letter-spacing: .02em; text-transform: uppercase; }
+h1 { min-width: 0; margin: 0; font: 800 22px/1 var(--display); letter-spacing: .02em; text-transform: uppercase; }
 h1 span { color: var(--stop); }
 .hdrBtns { display: flex; align-items: center; gap: 8px; }
 button.small { padding: 8px 12px; font-size: 14px; border-color: var(--ink); }
 .mode {
+  white-space: nowrap;
   font: 700 13px/1 var(--display); letter-spacing: .12em; text-transform: uppercase;
   padding: 6px 10px; border-radius: 999px; background: var(--line); color: var(--ink);
 }
@@ -73,7 +74,7 @@ button.small { padding: 8px 12px; font-size: 14px; border-color: var(--ink); }
 .stage canvas { touch-action: none; }
 .banner {
   position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 20px);
-  background: var(--stop); color: #fff; padding: 6px 12px; border-radius: 8px; white-space: nowrap;
+  background: var(--stop); color: #fff; padding: 6px 12px; border-radius: 8px; text-align: center; width: max-content;
   font: 700 14px/1.1 var(--display); letter-spacing: .06em; text-transform: uppercase; pointer-events: none;
 }
 .setupCard { background: var(--surface); border: 2px solid var(--ink); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
@@ -139,7 +140,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .err { color: var(--stop); font-weight: 600; }
 
 @media (orientation: landscape) and (max-height: 560px) {
-  .app { grid-template-rows: auto 1fr; grid-template-columns: 1fr minmax(230px, 30%); }
+  .app { grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) minmax(230px, 30%); }
   header { grid-column: 1 / -1; padding-block: 4px; }
   h1 { font-size: 18px; }
   .panel { max-height: none; min-height: 0; border-top: 0; border-left: 1px solid var(--line); gap: 10px; padding-block: 8px; }
@@ -213,7 +214,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       <button class="stopBtn" id="stopBtn" hidden>Stop timer</button>
     </div>
 
-    <p class="hint" id="hint">Drive the car through each gate. You should hear a high beep at START and a double beep at FINISH. The bar shows how much the gate sees; crossing the black mark counts as a hit. To fine-tune a line, drag its dots on the picture.</p>
+    <p class="hint" id="hint">Drive the car through each gate. You should hear a high beep at START and a double beep at FINISH. The bar shows how much the gate sees; crossing the black mark counts as a hit. To fine-tune a line, drag its dots on the picture. For a far-away car, raise Sensitivity.</p>
 
     <div class="row">
       <div class="slider">
@@ -314,7 +315,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   let lensChoice = store.get('rt.lens', '0.5x');
   async function openCamera(deviceId) {
     if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
-    const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    const base = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: 'environment' } }
@@ -384,10 +385,10 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 
   // ---------- setup (tap rocks) ----------
   const steps = [
-    ['s', 'Tap the START rock', 'Tap the rock on the picture above. It is one end of the start line.'],
-    ['s', 'Tap across the track', 'Tap the far side of the track, straight across from the START rock.'],
-    ['f', 'Tap the FINISH rock', 'Tap the rock on the picture. It is one end of the finish line.'],
-    ['f', 'Tap across the track', 'Tap the far side of the track, straight across from the FINISH rock.']
+    ['s', 'Tap the START rock', 'Touch the picture, slide until the magnifier crosshair is on the rock, then lift.'],
+    ['s', 'Tap across the track', 'Same way: put the crosshair on the far side of the track, straight across from the START rock.'],
+    ['f', 'Tap the FINISH rock', 'Touch, slide the crosshair onto the FINISH rock, then lift.'],
+    ['f', 'Tap across the track', 'Put the crosshair on the far side of the track, straight across from the FINISH rock.']
   ];
   function setMode(m) {
     mode = m; const chip = $('modeChip');
@@ -428,11 +429,15 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     showStep(); draw();
   });
   $('keepBtn').addEventListener('click', () => { if (backupGates) { gates = backupGates; enterTest(); } });
-  // Drag a gate's dots in test mode to fine-tune it.
-  let dragging = null;
+  // Touch handling. While a finger is down, a magnifier shows the spot under it, and the
+  // dot lands where the finger lifts. In test mode the same works for dragging existing dots.
+  let dragging = null, loupe = null;
   const toNorm = e => { const r = overlay.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
   overlay.addEventListener('pointerdown', e => {
+    if (mode === 'setup') {
+      loupe = toNorm(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); draw(); return;
+    }
     if (mode !== 'test' || !gates) return;
     const r = overlay.getBoundingClientRect(); let best = null, bestD = 34;
     for (const g of ['start', 'finish']) for (const end of ['a', 'b']) {
@@ -440,23 +445,15 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       if (d < bestD) { bestD = d; best = { g, end }; }
     }
     if (!best) return;
-    dragging = best; overlay.setPointerCapture(e.pointerId); e.preventDefault();
+    dragging = best; loupe = toNorm(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); draw();
   });
   overlay.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    gates[dragging.g][dragging.end] = toNorm(e); draw();
+    if (!loupe) return;
+    loupe = toNorm(e);
+    if (dragging) gates[dragging.g][dragging.end] = loupe;
+    draw();
   });
-  const endDrag = () => {
-    if (!dragging) return;
-    const g = dragging.g; dragging = null;
-    saveGates(gates); det[g] = buildGate(gates[g]); beep(990, 0.05);
-  };
-  overlay.addEventListener('pointerup', endDrag);
-  overlay.addEventListener('pointercancel', endDrag);
-
-  overlay.addEventListener('pointerdown', e => {
-    if (mode !== 'setup') return;
-    const p = toNorm(e);
+  function placeSetupPoint(p) {
     if (setupStep === 0) draft.start = { a: p };
     else if (setupStep === 1) draft.start.b = p;
     else if (setupStep === 2) draft.finish = { a: p };
@@ -465,7 +462,18 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     setupStep++;
     if (setupStep > 3) { saveGates(draft); enterTest(); }
     else { showStep(); draw(); }
-  });
+  }
+  const endTouch = (cancel) => {
+    if (!loupe) return;
+    const p = loupe; loupe = null;
+    if (dragging) {
+      const g = dragging.g; dragging = null;
+      saveGates(gates); det[g] = buildGate(gates[g]); beep(990, 0.05); draw();
+    } else if (mode === 'setup' && !cancel) placeSetupPoint(p);
+    else draw();
+  };
+  overlay.addEventListener('pointerup', () => endTouch(false));
+  overlay.addEventListener('pointercancel', () => endTouch(true));
 
   // ---------- test mode ----------
   function enterTest() {
@@ -489,29 +497,47 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   });
   // Higher sensitivity = smaller brightness change counts, and a shorter covered stretch is enough.
   const pixThresh = () => 40 - sens * 2.5;          // 37.5 .. 15 (0-255 brightness)
-  const minRun = () => 15 - sens;                   // 14 .. 5 pixels of the line (camera image scaled to 320 wide)
+  // Covered stretch needed along a gate line, as a share of the picture's long side:
+  // sensitivity 1 = 2%, 5 = 1.3%, 10 = 0.4%. "long" is the long side in the gate's pixels.
+  const minRun = long => Math.max(5, Math.round((0.2 + 0.18 * (11 - sens)) / 100 * long));
   function updateThresholdMarks() {                 // meter runs 0..2x the needed stretch; the mark sits at 1x
     $('tStart').style.left = '50%'; $('tFinish').style.left = '50%';
   }
 
   // ---------- detector ----------
+  // Each gate reads its own small crop of the camera picture at high detail, instead of a
+  // shrunken copy of the whole picture, so a small or distant car covers more pixels.
   function buildGate(g) {
-    const ax = g.a.x * PROC_W, ay = g.a.y * PROC_H, bx = g.b.x * PROC_W, by = g.b.y * PROC_H;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const sc = Math.min(1920, Math.max(vw, vh)) / Math.max(vw, vh);   // full camera detail (capped at 1920)
+    const DW = vw * sc, DH = vh * sc;
+    const ax = g.a.x * DW, ay = g.a.y * DH, bx = g.b.x * DW, by = g.b.y * DH;
+    const pad = 6;
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - pad)), y0 = Math.max(0, Math.floor(Math.min(ay, by) - pad));
+    const x1 = Math.min(Math.floor(DW), Math.ceil(Math.max(ax, bx) + pad)), y1 = Math.min(Math.floor(DH), Math.ceil(Math.max(ay, by) + pad));
+    const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
     const len = Math.max(1, Math.hypot(bx - ax, by - ay));
     const n = Math.max(12, Math.round(len));
     const nx = -(by - ay) / len, ny = (bx - ax) / len;
     const idx = [], slots = [];
     for (let i = 0; i <= n; i++) {
-      const cx = ax + (bx - ax) * i / n, cy = ay + (by - ay) * i / n;
+      const px = ax + (bx - ax) * i / n, py = ay + (by - ay) * i / n;
       const from = idx.length;
-      for (let o = -2; o <= 2; o++) {
-        const x = Math.round(cx + nx * o), y = Math.round(cy + ny * o);
-        if (x >= 0 && y >= 0 && x < PROC_W && y < PROC_H) idx.push((y * PROC_W + x) * 4);
+      for (let o = -3; o <= 3; o++) {
+        const x = Math.round(px + nx * o) - x0, y = Math.round(py + ny * o) - y0;
+        if (x >= 0 && y >= 0 && x < cw && y < ch) idx.push((y * cw + x) * 4);
       }
       slots.push([from, idx.length]);
     }
     return { idx: Int32Array.from(idx), slots, bg: new Float32Array(idx.length), cur: new Float32Array(idx.length),
-             warm: 0, active: false, last: -1e9, level: 0 };
+             warm: 0, active: false, last: -1e9, level: 0, long: Math.max(DW, DH),
+             cx, cw, ch, src: [x0 / sc, y0 / sc, cw / sc, ch / sc] };
+  }
+  function grab(d) {
+    d.cx.drawImage(video, d.src[0], d.src[1], d.src[2], d.src[3], 0, 0, d.cw, d.ch);
+    return d.cx.getImageData(0, 0, d.cw, d.ch).data;
   }
   function analyse(d, px, now, name) {
     const { idx, bg, cur } = d, n = idx.length;
@@ -524,7 +550,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     }
     const shift = sum / n;                   // cancels a cloud or shadow that brightens/darkens the whole line
     const th = pixThresh();
-    // A spot along the line counts as "covered" when most of its 5-pixel band changed.
+    // A spot along the line counts as "covered" when most of its 7-pixel band changed.
     // The car only covers a short piece of a line that spans the track, so we look for
     // the longest unbroken covered stretch instead of a share of the whole line.
     let run = 0, best = 0, gap = 0;
@@ -532,10 +558,10 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       const [from, to] = d.slots[s]; let c = 0;
       for (let i = from; i < to; i++) if (Math.abs(cur[i] - bg[i] - shift) > th) c++;
       if (to > from && c * 2 > (to - from)) { run += 1 + gap; gap = 0; if (run > best) best = run; }
-      else if (run > 0 && gap < 1) gap++;    // tolerate a one-pixel break
+      else if (run > 0 && gap < 2) gap++;    // tolerate a small break
       else { run = 0; gap = 0; }
     }
-    const need = minRun();
+    const need = minRun(d.long);
     const level = best / need; d.level = level;
     if (!d.active && level >= 1 && now - d.last > 800) { d.active = true; d.last = now; onCross(name, now); }
     else if (d.active && level < 0.4) d.active = false;
@@ -599,8 +625,8 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
           det.start.warm = 0; det.finish.warm = 0; det.start.level = 0; det.finish.level = 0;
           det.start.active = false; det.finish.active = false;
         } else {
-          analyse(det.start, px, now, 'start');
-          analyse(det.finish, px, now, 'finish');
+          analyse(det.start, grab(det.start), now, 'start');
+          analyse(det.finish, grab(det.finish), now, 'finish');
         }
         paintMeters(); draw();
       }
@@ -646,6 +672,25 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     if (!src) return;
     drawGate(src.start, 'START', css('--go'), det.start && det.start.active, w, h);
     drawGate(src.finish, 'FINISH', css('--stop'), det.finish && det.finish.active, w, h);
+    if (loupe) drawLoupe(w, h);
+  }
+  function drawLoupe(w, h) {
+    const R = Math.min(80, Math.max(56, Math.min(w, h) * 0.2)), Z = 3;
+    const fx = loupe.x * w, fy = loupe.y * h;
+    let cx = fx, cy = fy - R - 40;                       // sit above the finger
+    if (cy - R < 0) cy = fy + R + 40;                    // or below it near the top edge
+    cx = Math.min(Math.max(cx, R + 4), w - R - 4); cy = Math.min(Math.max(cy, R + 4), h - R - 4);
+    const vpc = video.videoWidth / w, sw = (2 * R / Z) * vpc;
+    octx.save();
+    octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.closePath(); octx.clip();
+    octx.fillStyle = '#000'; octx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+    try { octx.drawImage(video, fx * vpc - sw / 2, fy * vpc - sw / 2, sw, sw, cx - R, cy - R, 2 * R, 2 * R); } catch (e) {}
+    octx.restore();
+    octx.strokeStyle = '#fff'; octx.lineWidth = 3; octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.stroke();
+    octx.strokeStyle = css('--amber'); octx.lineWidth = 2;
+    octx.beginPath(); octx.moveTo(cx - 14, cy); octx.lineTo(cx - 4, cy); octx.moveTo(cx + 4, cy); octx.lineTo(cx + 14, cy);
+    octx.moveTo(cx, cy - 14); octx.lineTo(cx, cy - 4); octx.moveTo(cx, cy + 4); octx.lineTo(cx, cy + 14); octx.stroke();
+    octx.fillStyle = css('--amber'); octx.beginPath(); octx.arc(fx, fy, 4, 0, Math.PI * 2); octx.fill();
   }
   function drawGate(g, label, color, hot, w, h) {
     if (!g || !g.a) return;
