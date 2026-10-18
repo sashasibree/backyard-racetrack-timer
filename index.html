@@ -58,6 +58,8 @@ header {
 }
 h1 { margin: 0; font: 800 22px/1 var(--display); letter-spacing: .02em; text-transform: uppercase; }
 h1 span { color: var(--stop); }
+.hdrBtns { display: flex; align-items: center; gap: 8px; }
+button.small { padding: 8px 12px; font-size: 14px; border-color: var(--ink); }
 .mode {
   font: 700 13px/1 var(--display); letter-spacing: .12em; text-transform: uppercase;
   padding: 6px 10px; border-radius: 999px; background: var(--line); color: var(--ink);
@@ -152,7 +154,10 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 <div class="app">
   <header>
     <h1>Backyard <span>Race</span> Timer</h1>
-    <span class="mode" id="modeChip">Off</span>
+    <div class="hdrBtns">
+      <button class="small" id="hdrRedo" hidden>Redo gates</button>
+      <span class="mode" id="modeChip">Off</span>
+    </div>
   </header>
 
   <div class="stageWrap" id="stageWrap">
@@ -205,7 +210,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       <span class="time" id="runTime">--.--</span>
     </div>
 
-    <p class="hint" id="hint">Drive the car through each gate. You should hear a high beep at START and a double beep at FINISH. The bar shows how much the gate sees; crossing the black mark counts as a hit.</p>
+    <p class="hint" id="hint">Drive the car through each gate. You should hear a high beep at START and a double beep at FINISH. The bar shows how much the gate sees; crossing the black mark counts as a hit. To fine-tune a line, drag its dots on the picture.</p>
 
     <div class="row">
       <div class="slider">
@@ -288,7 +293,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       const want = lensChoice === '1x' ? lenses.wide : (lenses.ultra || lenses.wide);
       if (want && want !== currentDeviceId) await openCamera(want);
       renderLensButtons();
-      $('intro').hidden = true; $('panel').hidden = false;
+      $('intro').hidden = true; $('panel').hidden = false; $('hdrRedo').hidden = false;
       layout(); keepAwake();
       gates = gatesBy[orient()] || null; lastOrient = orient();
       if (gates) enterTest(); else enterSetup();
@@ -386,6 +391,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     chip.textContent = m === 'setup' ? 'Mark gates' : m === 'test' ? 'Gate test' : 'Off';
     chip.className = 'mode ' + m;
     $('setupCard').hidden = m !== 'setup';
+    $('hdrRedo').textContent = m === 'setup' ? 'Start over' : 'Redo gates';
     $('testArea').hidden = m !== 'test';
   }
   let backupGates = null;
@@ -419,10 +425,35 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     showStep(); draw();
   });
   $('keepBtn').addEventListener('click', () => { if (backupGates) { gates = backupGates; enterTest(); } });
+  // Drag a gate's dots in test mode to fine-tune it.
+  let dragging = null;
+  const toNorm = e => { const r = overlay.getBoundingClientRect();
+    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
+  overlay.addEventListener('pointerdown', e => {
+    if (mode !== 'test' || !gates) return;
+    const r = overlay.getBoundingClientRect(); let best = null, bestD = 34;
+    for (const g of ['start', 'finish']) for (const end of ['a', 'b']) {
+      const pt = gates[g][end], d = Math.hypot(pt.x * r.width - (e.clientX - r.left), pt.y * r.height - (e.clientY - r.top));
+      if (d < bestD) { bestD = d; best = { g, end }; }
+    }
+    if (!best) return;
+    dragging = best; overlay.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  overlay.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    gates[dragging.g][dragging.end] = toNorm(e); draw();
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    const g = dragging.g; dragging = null;
+    saveGates(gates); det[g] = buildGate(gates[g]); beep(990, 0.05);
+  };
+  overlay.addEventListener('pointerup', endDrag);
+  overlay.addEventListener('pointercancel', endDrag);
+
   overlay.addEventListener('pointerdown', e => {
     if (mode !== 'setup') return;
-    const r = overlay.getBoundingClientRect();
-    const p = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    const p = toNorm(e);
     if (setupStep === 0) draft.start = { a: p };
     else if (setupStep === 1) draft.start.b = p;
     else if (setupStep === 2) draft.finish = { a: p };
@@ -441,6 +472,10 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     say('Gates set. Drive through each gate to test.');
   }
   $('redoBtn').addEventListener('click', enterSetup);
+  $('hdrRedo').addEventListener('click', () => {
+    if (mode === 'setup') { const keep = backupGates; enterSetup(); backupGates = keep; $('keepBtn').hidden = !keep; }
+    else enterSetup();
+  });
   $('resetBtn').addEventListener('click', () => {
     counts = { start: 0, finish: 0 }; $('cStart').textContent = '0'; $('cFinish').textContent = '0';
     runStartAt = null; stopLive(); $('runTime').textContent = '--.--'; $('log').innerHTML = '';
@@ -613,7 +648,8 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
       octx.strokeStyle = hot ? css('--amber') : color; octx.lineWidth = hot ? 8 : 4;
       octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
-      octx.fillStyle = '#fff'; octx.beginPath(); octx.arc(bx, by, 5, 0, Math.PI * 2); octx.fill();
+      octx.fillStyle = '#fff'; octx.strokeStyle = color; octx.lineWidth = 3;
+      octx.beginPath(); octx.arc(bx, by, 8, 0, Math.PI * 2); octx.fill(); octx.stroke();
     }
     octx.fillStyle = color; octx.strokeStyle = '#fff'; octx.lineWidth = 2;
     octx.beginPath(); octx.arc(ax, ay, 9, 0, Math.PI * 2); octx.fill(); octx.stroke();
