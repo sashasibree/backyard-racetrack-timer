@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Race Timer Duo</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Race Timer">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen app. Camera stage fills the top (or left in landscape); control panel below (or right). */
+:root {
+  --bg: #eef0ea;          /* dusty daylight */
+  --surface: #ffffff;
+  --ink: #1b1f1a;
+  --muted: #5d665a;
+  --line: #d4d9cf;
+  --go: #19a058;          /* start gate / ready */
+  --stop: #d8342b;        /* finish gate */
+  --amber: #e8a317;
+  --stage: #0d0f0c;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --body: "Barlow", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121411; --surface: #1c1f1b; --ink: #eef1ea; --muted: #9aa396; --line: #2f342d;
+    --go: #2fc173; --stop: #f0554b; --amber: #f2b632; --stage: #000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121411; --surface: #1c1f1b; --ink: #eef1ea; --muted: #9aa396; --line: #2f342d;
+  --go: #2fc173; --stop: #f0554b; --amber: #f2b632; --stage: #000;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; overflow-x: hidden; }
+body {
+  background: var(--bg); color: var(--ink); font: 16px/1.4 var(--body);
+  -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+}
+.app {
+  height: 100%; display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1 { min-width: 0; margin: 0; font: 800 22px/1 var(--display); letter-spacing: .02em; text-transform: uppercase; }
+h1 span { color: var(--stop); }
+.hdrBtns { display: flex; align-items: center; gap: 8px; }
+button.small { padding: 8px 12px; font-size: 14px; border-color: var(--ink); }
+.mode {
+  white-space: nowrap;
+  font: 700 13px/1 var(--display); letter-spacing: .12em; text-transform: uppercase;
+  padding: 6px 10px; border-radius: 999px; background: var(--line); color: var(--ink);
+}
+.mode.test { background: var(--amber); color: #1b1f1a; }
+.mode.setup { background: var(--ink); color: var(--bg); }
+
+.stageWrap { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--stage); overflow: hidden; }
+.stage { position: relative; }
+.stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage canvas { touch-action: none; }
+.banner {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 20px);
+  background: var(--stop); color: #fff; padding: 6px 12px; border-radius: 8px; text-align: center; width: max-content;
+  font: 700 14px/1.1 var(--display); letter-spacing: .06em; text-transform: uppercase; pointer-events: none;
+}
+.setupCard { background: var(--surface); border: 2px solid var(--ink); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
+.stepNo { font: 700 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.stepTitle { font: 800 24px/1.05 var(--display); text-transform: uppercase; }
+.stepTitle .s { color: var(--go); } .stepTitle .f { color: var(--stop); }
+.stepSub { margin: 0; font-size: 14px; color: var(--muted); }
+.tip { margin: 0; font-size: 13px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; }
+.lens { display: flex; gap: 6px; align-items: center; }
+.lens span { font-size: 13px; color: var(--muted); margin-right: 2px; }
+.lens button { padding: 8px 12px; font-size: 15px; }
+.lens button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+#testArea { display: grid; gap: 12px; }
+@media (orientation: landscape) { .rotateTip { display: none; } }
+
+.panel {
+  display: grid; gap: 12px; align-content: start; overflow-y: auto; max-height: 46vh;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-top: 1px solid var(--line); background: var(--bg);
+}
+.gates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gate { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+.gate .top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; }
+.gate .top > span:last-child { white-space: nowrap; }
+.gate .name { font: 800 16px/1 var(--display); letter-spacing: .1em; }
+.gate.start .name { color: var(--go); }
+.gate.finish .name { color: var(--stop); }
+.gate .count { font: 700 26px/1 var(--display); font-variant-numeric: tabular-nums; }
+.gate .unit { font-size: 12px; color: var(--muted); }
+.meter { position: relative; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--muted); transition: width 60ms linear; }
+.gate.hot .meter i { background: var(--amber); }
+.meter b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
+.gate.flash { animation: flash .5s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 4px var(--amber); } to { box-shadow: 0 0 0 0 transparent; } }
+
+.run { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.run .label { font: 700 13px/1.2 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.run .time { font: 800 44px/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.run .time.live { color: var(--amber); }
+.run { flex-wrap: wrap; }
+.stopBtn { flex: 1 1 100%; background: var(--stop); border-color: var(--stop); color: #fff; padding: 14px; font-size: 18px; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.slider { flex: 1 1 200px; display: grid; gap: 4px; }
+.slider label { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+input[type=range] { width: 100%; accent-color: var(--go); }
+button {
+  font: 700 16px/1 var(--display); letter-spacing: .08em; text-transform: uppercase;
+  padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer;
+}
+button.primary { background: var(--go); border-color: var(--go); color: #fff; }
+button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.hint { margin: 0; font-size: 14px; color: var(--muted); }
+.log { margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+
+/* Start screen */
+.intro { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: var(--stage); z-index: 5; }
+.intro .card { background: var(--surface); color: var(--ink); border-radius: 14px; padding: 22px; max-width: 420px; display: grid; gap: 12px; }
+.intro h2 { margin: 0; font: 800 28px/1.05 var(--display); text-transform: uppercase; text-wrap: balance; }
+.intro p { margin: 0; color: var(--muted); }
+.intro ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.err { color: var(--stop); font-weight: 600; }
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .app { grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) minmax(230px, 30%); }
+  header { grid-column: 1 / -1; padding-block: 4px; }
+  h1 { font-size: 18px; }
+  .panel { max-height: none; min-height: 0; border-top: 0; border-left: 1px solid var(--line); gap: 10px; padding-block: 8px; }
+  .gates { grid-template-columns: 1fr; gap: 8px; }
+  .gate { padding: 8px 10px; }
+  .run .time { font-size: 34px; }
+  .hint { font-size: 13px; }
+  .stepTitle { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .gate.flash { animation: none; } .meter i { transition: none; } }
+/* Two-device additions */
+.brand span.duo { color: var(--go); }
+.conn { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+.connTop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.ok { background: var(--go); } .dot.wait { background: var(--amber); } .dot.bad { background: var(--stop); }
+.connText { font-weight: 600; min-width: 0; }
+.code { font: 800 44px/1 var(--display); letter-spacing: .18em; font-variant-numeric: tabular-nums; }
+.codeLabel { font: 700 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.joinRow { display: flex; gap: 8px; flex-wrap: wrap; }
+.joinRow input { font: 800 28px/1 var(--display); letter-spacing: .2em; width: 6.5ch; padding: 8px 10px; border-radius: 10px; border: 2px solid var(--ink); background: var(--bg); color: var(--ink); text-align: center; }
+.sync { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sync b { color: var(--ink); }
+.roles { display: grid; gap: 10px; }
+.roles button { text-align: left; padding: 14px 16px; display: grid; gap: 4px; }
+.roles button small { font: 500 14px/1.3 var(--body); text-transform: none; letter-spacing: 0; color: var(--muted); }
+.roles button.primary small { color: #fff; opacity: .9; }
+.sent { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1 class="brand">Race Timer <span class="duo">Duo</span></h1>
+    <div class="hdrBtns">
+      <button class="small" id="hdrRedo" hidden>Redo gate</button>
+      <span class="mode" id="modeChip">Off</span>
+    </div>
+  </header>
+
+  <div class="stageWrap" id="stageWrap">
+    <div class="stage" id="stage">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+      <div class="banner" id="moveBanner" hidden>Camera moving. Keep the device still.</div>
+    </div>
+    <div class="intro" id="intro">
+      <div class="card">
+        <h2>Connection test</h2>
+        <p>Two devices, one at each gate. This test checks that they pair, agree on the time, and both see the car.</p>
+        <div class="roles">
+          <button class="primary" id="roleFinish">Finish gate + timer<small>Use on the iPad. It shows a pairing code and the times.</small></button>
+          <button id="roleStart">Start gate<small>Use on the iPhone. You type the iPad's code.</small></button>
+        </div>
+        <p class="err" id="err" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel" id="panel" hidden>
+    <p class="tip rotateTip">Turn the device sideways for a bigger picture. If it does not rotate, turn off Portrait Orientation Lock in Control Center.</p>
+
+    <div class="conn" id="conn">
+      <div class="connTop"><span class="dot wait" id="connDot"></span><span class="connText" id="connText">Starting</span></div>
+      <div id="hostBox" hidden>
+        <div class="codeLabel">Pairing code</div>
+        <div class="code" id="codeShow">----</div>
+      </div>
+      <div id="joinBox" hidden>
+        <div class="codeLabel">Type the code shown on the iPad</div>
+        <div class="joinRow">
+          <input id="codeIn" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="Pairing code">
+          <button class="primary" id="joinBtn">Connect</button>
+        </div>
+      </div>
+      <div class="sync" id="syncLine" hidden></div>
+    </div>
+
+    <div class="setupCard" id="setupCard" hidden>
+      <div class="stepNo" id="stepNo">Step 1 of 2</div>
+      <div class="stepTitle" id="stepTitle"></div>
+      <p class="stepSub" id="stepSub"></p>
+      <div class="row"><button id="undoBtn">Undo tap</button><button id="keepBtn" hidden>Keep old gate</button></div>
+    </div>
+
+    <div class="lens" id="lensRow" hidden><span>Lens</span></div>
+
+    <div id="testArea">
+      <div class="gates" style="grid-template-columns: 1fr;">
+        <div class="gate" id="gCard">
+          <div class="top"><span class="name" id="gName">GATE</span><span><span class="count" id="cGate">0</span> <span class="unit">hits</span></span></div>
+          <div class="meter"><i id="mGate"></i><b style="left:50%"></b></div>
+        </div>
+      </div>
+
+      <div class="run" id="runCard">
+        <span class="label" id="runLabel">Test run<br>start to finish</span>
+        <span class="time" id="runTime">--.--</span>
+        <button class="stopBtn" id="stopBtn" hidden>Stop timer</button>
+      </div>
+
+      <p class="hint" id="hint"></p>
+
+      <div class="row">
+        <div class="slider">
+          <label for="sens"><span>Sensitivity</span><span id="sensVal">5</span></label>
+          <input type="range" id="sens" min="1" max="10" step="1" value="5">
+        </div>
+      </div>
+      <div class="row">
+        <button id="beepBtn">Test beep on other device</button>
+        <button id="resetBtn">Reset counts</button>
+      </div>
+      <ul class="log" id="log"></ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+  const stage = $('stage'), stageWrap = $('stageWrap');
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  // One clock for everything on this device. (__skew lets a test pretend two devices disagree.)
+  const clock = () => performance.now() + (window.__skew || 0);
+  const LOOPBACK = location.hash === '#loopback';
+
+  let role = null;                 // 'start' | 'finish'
+  let mode = 'off';                // off | setup | test
+  let sens = store.get('duo.sens', 5);
+  let gatesBy = {}, gate = null;   // this device's single gate {a,b} in 0..1 coords
+  let det = null, hits = 0;
+  let setupStep = 0, draft = {};
+  const orient = () => (video.videoWidth >= video.videoHeight ? 'land' : 'port');
+
+  // ---------- log + sounds ----------
+  function log(text) {
+    const li = document.createElement('li');
+    li.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) + '  ' + text;
+    const l = $('log'); l.prepend(li); while (l.children.length > 8) l.lastChild.remove();
+  }
+  let actx = null;
+  function beep(freq, dur = 0.12, when = 0) {
+    if (!actx) return;
+    const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function say(text) { try { if (!window.speechSynthesis) return; speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; speechSynthesis.speak(u); } catch (e) {} }
+  let wakeLock = null;
+  async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode !== 'off') keepAwake(); });
+
+  // ---------- connection layer ----------
+  // Link hides how the two devices talk. Real use: PeerJS (a free public matchmaker introduces
+  // the devices, then they talk directly). Tests: a BroadcastChannel between two windows.
+  const PEER_PREFIX = 'brt-duo-';
+  const Link = {
+    open: false, onMsg: null, onState: null,
+    send(o) { if (this.open && this._send) { try { this._send(o); return true; } catch (e) {} } return false; },
+    state(s, text) { this.open = s === 'ok'; this.onState && this.onState(s, text); }
+  };
+  function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.append(s); }); }
+  async function loadPeer() {
+    if (window.Peer) return;
+    for (const src of ['https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js', 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js']) {
+      try { await loadScript(src); if (window.Peer) return; } catch (e) {}
+    }
+    throw new Error('peer-load');
+  }
+
+  // Loopback transport for testing: adds a random 20-200 ms delay to every message.
+  function loopbackHost(code) {
+    const bc = new BroadcastChannel('duo-' + code);
+    Link._send = o => bc.postMessage({ from: 'finish', o });
+    bc.onmessage = e => { if (e.data.from !== 'start') return;
+      if (e.data.o.type === 'hello') Link.state('ok', 'Connected to the start phone');
+      setTimeout(() => Link.onMsg && Link.onMsg(e.data.o), 20 + Math.random() * 180); };
+    Link.state('wait', 'Waiting for the start phone');
+  }
+  function loopbackJoin(code) {
+    const bc = new BroadcastChannel('duo-' + code);
+    Link._send = o => bc.postMessage({ from: 'start', o });
+    bc.onmessage = e => { if (e.data.from !== 'finish') return; setTimeout(() => Link.onMsg && Link.onMsg(e.data.o), 20 + Math.random() * 180); };
+    Link.open = true; Link._send({ type: 'hello' }); Link.state('ok', 'Connected to the finish iPad');
+  }
+
+  // Finish iPad: registers under its pairing code and waits for the phone.
+  let peer = null, conn = null, hostTries = 0;
+  async function host(code) {
+    if (LOOPBACK) return loopbackHost(code);
+    Link.state('wait', 'Connecting to the pairing service');
+    try { await loadPeer(); } catch (e) { Link.state('bad', 'Could not load the pairing tool. Check the internet connection and reload.'); return; }
+    peer = new Peer(PEER_PREFIX + code, { debug: 1 });
+    peer.on('open', () => { hostTries = 0; Link.state('wait', 'Waiting for the start phone'); });
+    peer.on('connection', c => {
+      if (conn && conn.open) conn.close();
+      conn = c; wireConn(c, 'Connected to the start phone');
+    });
+    peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
+    peer.on('error', err => {
+      if (err.type === 'unavailable-id') {
+        // The code is still held from a moment ago (for example after a reload). Retry, then pick a new code.
+        peer.destroy();
+        if (++hostTries <= 4) { Link.state('wait', 'Reclaiming code ' + code); setTimeout(() => host(code), 2500); }
+        else { hostTries = 0; const c2 = newCode(); setTimeout(() => host(c2), 200); }
+      } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
+        Link.state('bad', 'Lost the pairing service. Retrying.');
+        setTimeout(() => { try { peer.reconnect(); } catch (e) {} }, 3000);
+      } else Link.state('bad', 'Connection problem (' + err.type + ')');
+    });
+  }
+  // Start phone: connects to the iPad's code and keeps retrying if the link drops.
+  let joinCode = null, joinTimer = null;
+  async function join(code) {
+    joinCode = code; store.set('duo.joinCode', code);
+    if (LOOPBACK) return loopbackJoin(code);
+    Link.state('wait', 'Looking for the iPad with code ' + code);
+    try { await loadPeer(); } catch (e) { Link.state('bad', 'Could not load the pairing tool. Check the internet connection and reload.'); return; }
+    const go = () => {
+      const c = peer.connect(PEER_PREFIX + code, { reliable: true });
+      conn = c; wireConn(c, 'Connected to the finish iPad');
+    };
+    if (peer && !peer.destroyed && peer.open) return go();
+    if (peer) try { peer.destroy(); } catch (e) {}
+    peer = new Peer({ debug: 1 });
+    peer.on('open', go);
+    peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
+    peer.on('error', err => {
+      if (err.type === 'peer-unavailable') Link.state('bad', 'No iPad found with code ' + code + '. Check the code on the iPad.');
+      else Link.state('bad', 'Connection problem (' + err.type + '). Retrying.');
+      retryJoin();
+    });
+  }
+  function retryJoin() { clearTimeout(joinTimer); if (joinCode) joinTimer = setTimeout(() => { if (!Link.open) join(joinCode); }, 4000); }
+  function wireConn(c, okText) {
+    Link._send = o => c.send(o);
+    c.on('open', () => { Link.state('ok', okText); });
+    c.on('data', d => Link.onMsg && Link.onMsg(d));
+    c.on('close', () => { if (c === conn) { Link.state('bad', 'Disconnected. Reconnecting.'); if (role === 'start') retryJoin(); else Link.state('wait', 'Waiting for the start phone'); } });
+    c.on('error', () => {});
+  }
+  function newCode() { const c = String(1000 + Math.floor(Math.random() * 9000)); store.set('duo.hostCode', c); $('codeShow').textContent = c; return c; }
+
+  Link.onState = (s, text) => {
+    $('connDot').className = 'dot ' + s;
+    $('connText').textContent = text;
+    if (role === 'start') $('joinBox').hidden = s === 'ok';
+    if (s === 'ok') { beep(990, 0.08); beep(1320, 0.1, 0.1); if (role === 'start') syncClocks(); }
+    else { $('syncLine').hidden = true; if (role === 'start') { synced = false; clearInterval(resyncTimer); } }
+  };
+
+  // ---------- clock matching ----------
+  // The phone asks the iPad for its time several times. Each round trip tells us roughly how far
+  // apart the two clocks are; the fastest round trip gives the most trustworthy answer.
+  // offset = iPad clock minus phone clock. A phone time t becomes an iPad time t + offset.
+  let offset = 0, offsetErr = Infinity, synced = false, resyncTimer = null;
+  const pending = new Map(); let pingId = 0;
+  function ping() {
+    return new Promise(res => {
+      const id = ++pingId, t0 = clock();
+      pending.set(id, { t0, res });
+      Link.send({ type: 'ping', id, t0 });
+      setTimeout(() => { if (pending.has(id)) { pending.delete(id); res(null); } }, 1500);
+    });
+  }
+  async function syncClocks() {
+    const samples = [];
+    for (let i = 0; i < 12 && Link.open; i++) { const s = await ping(); if (s) samples.push(s); await new Promise(r => setTimeout(r, 60)); }
+    if (!samples.length) return;
+    samples.sort((a, b) => a.rtt - b.rtt);
+    const best = samples[0];
+    // Keep the previous estimate if this round was noisier.
+    if (!synced || best.rtt / 2 <= offsetErr * 1.5) { offset = best.offset; offsetErr = best.rtt / 2; }
+    synced = true;
+    showSync();
+    Link.send({ type: 'sync', offsetErr, rtt: best.rtt });
+    clearInterval(resyncTimer); resyncTimer = setInterval(() => { if (Link.open) syncClocks(); }, 20000);
+  }
+  function showSync(err) {
+    const e = err !== undefined ? err : offsetErr;
+    const el = $('syncLine'); el.hidden = false;
+    el.innerHTML = '';
+    const b = document.createElement('b'); b.textContent = 'Clocks matched within ' + Math.max(1, Math.round(e)) + ' ms';
+    el.append(b, '. This is how far off a time could be from the link alone.');
+  }
+
+  // ---------- messages ----------
+  let runStartAt = null, liveTimer = null, runTimeout = null, crossSeq = 0;
+  let startPending = false;
+  let cancelledUpTo = 0, lastStartSeq = 0;   // which phone starts have been cancelled (messages can arrive out of order)        // phone: a start was sent and the iPad has not finished or cancelled it
+  const sentAt = new Map();
+  Link.onMsg = m => {
+    if (!m || !m.type) return;
+    if (m.type === 'ping') Link.send({ type: 'pong', id: m.id, t0: m.t0, t1: clock() });
+    else if (m.type === 'pong') {
+      const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
+      const t2 = clock(), rtt = t2 - p.t0;
+      p.res({ rtt, offset: m.t1 - (p.t0 + t2) / 2 });
+    }
+    else if (m.type === 'sync') showSync(m.offsetErr);
+    else if (m.type === 'cross' && role === 'finish') {
+      Link.send({ type: 'ack', seq: m.seq });
+      if (m.seq <= cancelledUpTo) { log('Ignored a start that was already cancelled'); return; }
+      lastStartSeq = m.seq;
+      startRun(m.tf, m.seq);
+    }
+    else if (m.type === 'ack' && role === 'start') {
+      const t = sentAt.get(m.seq); if (t === undefined) return; sentAt.delete(m.seq);
+      log('iPad got the start (' + Math.round(clock() - t) + ' ms round trip)');
+    }
+    else if (m.type === 'cancel') { if (role === 'finish') cancelledUpTo = Math.max(cancelledUpTo, m.upTo || 0); cancelRun(false); log('Run cancelled from the ' + (role === 'start' ? 'iPad' : 'phone')); }
+    else if (m.type === 'beep') { beep(660, 0.12); beep(990, 0.12, 0.15); log('Test beep from the ' + (role === 'start' ? 'iPad' : 'phone')); }
+    else if (m.type === 'result' && role === 'start') {
+      startPending = false; $('stopBtn').hidden = true; $('runTime').textContent = m.s.toFixed(2);
+      log('Finish! ' + m.s.toFixed(2) + ' s'); beep(880, 0.1); beep(1320, 0.16, 0.14);
+    }
+  };
+
+  // ---------- runs ----------
+  function startRun(t, seq) {
+    runStartAt = t;
+    const el = $('runTime'); el.classList.add('live'); $('stopBtn').hidden = false;
+    clearInterval(liveTimer);
+    liveTimer = setInterval(() => { if (runStartAt !== null) el.textContent = Math.max(0, (clock() - runStartAt) / 1000).toFixed(2); }, 50);
+    clearTimeout(runTimeout);
+    runTimeout = setTimeout(() => { if (runStartAt !== null) { cancelRun(true); say('No finish. Run cancelled.'); log('No finish within 60 seconds, run cancelled'); } }, 60000);
+    beep(1320, 0.14);
+    if (role === 'finish') log('START from phone' + (seq ? ' (' + Math.round(clock() - t) + ' ms after the car crossed)' : ''));
+  }
+  function cancelRun(tell) {
+    runStartAt = null; startPending = false; clearInterval(liveTimer); clearTimeout(runTimeout);
+    $('runTime').classList.remove('live'); $('runTime').textContent = '--.--'; $('stopBtn').hidden = true;
+    if (tell) Link.send({ type: 'cancel', upTo: role === 'start' ? crossSeq : lastStartSeq });
+  }
+  function finishRun(t) {
+    if (runStartAt === null) { log('FINISH hit (no run in progress)'); beep(880, 0.1); return; }
+    const s = (t - runStartAt) / 1000;
+    clearInterval(liveTimer); clearTimeout(runTimeout); runStartAt = null;
+    const el = $('runTime'); el.classList.remove('live'); el.textContent = s.toFixed(2); $('stopBtn').hidden = true;
+    beep(880, 0.1); beep(1320, 0.16, 0.14);
+    log('FINISH, test run ' + s.toFixed(2) + ' s');
+    setTimeout(() => say(s.toFixed(2) + ' seconds'), 450);
+    Link.send({ type: 'result', s });
+  }
+  $('stopBtn').addEventListener('click', () => { cancelRun(true); beep(440, 0.15); log('Timer stopped and cleared'); });
+  $('beepBtn').addEventListener('click', () => { if (!Link.send({ type: 'beep' })) log('Not connected, nothing sent'); else log('Test beep sent'); });
+  $('resetBtn').addEventListener('click', () => { hits = 0; $('cGate').textContent = '0'; $('log').innerHTML = ''; });
+
+  // A gate crossing on this device.
+  function onCross(t) {
+    hits++; $('cGate').textContent = hits;
+    const card = $('gCard'); card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+    if (role === 'finish') { finishRun(t); return; }
+    // Start phone: send the exact crossing moment, already converted to the iPad's clock.
+    beep(1320, 0.14);
+    const seq = ++crossSeq;
+    sentAt.set(seq, clock());
+    const ok = Link.send({ type: 'cross', seq, t, tf: t + offset });
+    log(ok ? (synced ? 'START hit, sent to iPad' : 'START hit, sent (clocks not matched yet)') : 'START hit, but not connected to the iPad');
+    if (ok) { $('runTime').textContent = 'GO'; startPending = true; $('stopBtn').hidden = false; }
+  }
+
+  // ---------- role picker + camera ----------
+  async function begin(r) {
+    role = r; store.set('duo.role', r);
+    $('err').hidden = true;
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); await actx.resume(); beep(660, 0.05); } catch (e) {}
+    try { if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch (e) {}
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $('err').textContent = 'The camera only works when this page is opened from its https link.'; $('err').hidden = false; return;
+    }
+    try {
+      await openCamera(null);
+      await findLenses();
+      const want = lensChoice === '1x' ? lenses.wide : (lenses.ultra || lenses.wide);
+      if (want && want !== currentDeviceId) await openCamera(want);
+      renderLensButtons();
+    } catch (e) {
+      $('err').textContent = (e && e.name === 'NotAllowedError')
+        ? 'Camera access was blocked. Open Settings, Safari, Camera, choose Allow, then reload.'
+        : 'Could not start the camera (' + (e && e.name || 'error') + ').';
+      $('err').hidden = false; return;
+    }
+    $('intro').hidden = true; $('panel').hidden = false; $('hdrRedo').hidden = false;
+    const isFinish = r === 'finish';
+    $('gName').textContent = isFinish ? 'FINISH' : 'START';
+    $('gCard').className = 'gate ' + (isFinish ? 'finish' : 'start');
+    $('runLabel').innerHTML = isFinish ? 'Test run<br>start to finish' : 'Last run';
+    $('beepBtn').textContent = isFinish ? 'Test beep on phone' : 'Test beep on iPad';
+    $('hint').textContent = isFinish
+      ? 'Drive through the start gate, then the finish gate. The iPad times the run using the moment the phone saw the car. Drag the dots to fine-tune the line.'
+      : 'Drive through the start gate. The phone beeps and sends the exact moment to the iPad. Drag the dots to fine-tune the line.';
+    if (isFinish) { $('hostBox').hidden = false; host(store.get('duo.hostCode', null) || newCode()); $('codeShow').textContent = store.get('duo.hostCode'); }
+    else {
+      $('joinBox').hidden = false; Link.state('wait', 'Not connected yet');
+      const last = store.get('duo.joinCode', ''); $('codeIn').value = last || '';
+    }
+    gatesBy = store.get('duo.gates.' + r, {});
+    layout(); keepAwake();
+    gate = gatesBy[orient()] || null; lastOrient = orient();
+    gate ? enterTest() : enterSetup();
+    startLoop();
+  }
+  $('roleFinish').addEventListener('click', () => begin('finish'));
+  $('roleStart').addEventListener('click', () => begin('start'));
+  $('joinBtn').addEventListener('click', () => {
+    const c = $('codeIn').value.replace(/\D/g, '');
+    if (c.length !== 4) { Link.state('bad', 'The code has 4 digits'); return; }
+    join(c);
+  });
+  if (store.get('duo.role', null) === 'start') { $('roleStart').classList.add('primary'); $('roleFinish').classList.remove('primary'); }
+
+  // ---------- lenses ----------
+  let lenses = { wide: null, ultra: null }, currentDeviceId = null;
+  let lensChoice = store.get('duo.lens', '0.5x');
+  async function openCamera(deviceId) {
+    if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+    const base = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: 'environment' } } });
+    video.srcObject = stream;
+    const track = stream.getVideoTracks()[0];
+    currentDeviceId = (track.getSettings && track.getSettings().deviceId) || deviceId;
+    await video.play();
+    await new Promise(r => video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true }));
+    PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth); proc.width = PROC_W; proc.height = PROC_H;
+  }
+  async function findLenses() {
+    try {
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const back = cams.filter(d => !/front/i.test(d.label));
+      lenses.ultra = (back.find(d => /ultra/i.test(d.label)) || {}).deviceId || null;
+      lenses.wide = (back.find(d => /^back camera$/i.test(d.label.trim())) || back.find(d => !/ultra|tele|dual|triple/i.test(d.label)) || {}).deviceId || currentDeviceId;
+    } catch (e) {}
+  }
+  function renderLensButtons() {
+    const row = $('lensRow'); row.querySelectorAll('button').forEach(b => b.remove());
+    if (!lenses.ultra) { row.hidden = true; return; }
+    for (const [label, id] of [['0.5x', lenses.ultra], ['1x', lenses.wide]]) {
+      const b = document.createElement('button'); b.textContent = label; b.setAttribute('aria-pressed', String(id === currentDeviceId));
+      b.addEventListener('click', async () => {
+        if (id === currentDeviceId) return;
+        lensChoice = label; store.set('duo.lens', label);
+        try { await openCamera(id); } catch (e) { return; }
+        renderLensButtons(); layout();
+        gatesBy = {}; store.set('duo.gates.' + role, gatesBy); gate = null; enterSetup();
+      });
+      row.append(b);
+    }
+    row.hidden = false;
+  }
+
+  // ---------- layout ----------
+  const PROC_W = 320; let PROC_H = 180;
+  const proc = document.createElement('canvas');
+  const pctx = proc.getContext('2d', { willReadFrequently: true });
+  let lastOrient = null;
+  function layout() {
+    if (!video.videoWidth) return;
+    const ar = video.videoWidth / video.videoHeight, W = stageWrap.clientWidth, H = stageWrap.clientHeight;
+    let w = W, h = W / ar; if (h > H) { h = H; w = H * ar; }
+    stage.style.width = w + 'px'; stage.style.height = h + 'px';
+    const dpr = window.devicePixelRatio || 1;
+    overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr); octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const o = orient();
+    if (lastOrient && o !== lastOrient && mode !== 'off') {
+      PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth); proc.width = PROC_W; proc.height = PROC_H;
+      gate = gatesBy[o] || null; gate ? enterTest() : enterSetup();
+    }
+    lastOrient = o; draw();
+  }
+  window.addEventListener('resize', () => setTimeout(layout, 150));
+  window.addEventListener('orientationchange', () => setTimeout(layout, 400));
+  video.addEventListener('resize', () => setTimeout(layout, 50));
+
+  // ---------- gate setup ----------
+  function setMode(m) {
+    mode = m; const chip = $('modeChip');
+    chip.textContent = m === 'setup' ? 'Mark gate' : m === 'test' ? (role === 'finish' ? 'Finish' : 'Start') : 'Off';
+    chip.className = 'mode ' + m;
+    $('setupCard').hidden = m !== 'setup'; $('testArea').hidden = m !== 'test';
+    $('hdrRedo').textContent = m === 'setup' ? 'Start over' : 'Redo gate';
+  }
+  let backup = null;
+  function enterSetup() {
+    backup = gate; setMode('setup'); setupStep = 0; draft = {}; det = null;
+    $('keepBtn').hidden = !backup; moving = false; $('moveBanner').hidden = true;
+    showStep(); draw();
+  }
+  function showStep() {
+    const word = role === 'finish' ? 'FINISH' : 'START', k = role === 'finish' ? 'f' : 's';
+    $('stepNo').textContent = 'Step ' + (setupStep + 1) + ' of 2';
+    const title = $('stepTitle'); title.innerHTML = '';
+    if (setupStep === 0) { const em = document.createElement('span'); em.className = k; em.textContent = word; title.append('Tap the ', em, ' rock'); }
+    else title.textContent = 'Tap across the track';
+    $('stepSub').textContent = setupStep === 0
+      ? 'Touch the picture, slide until the magnifier crosshair is on the rock, then lift.'
+      : 'Put the crosshair on the far side of the track, straight across from the rock.';
+    $('undoBtn').disabled = setupStep === 0;
+  }
+  $('undoBtn').addEventListener('click', () => { if (setupStep === 0) return; setupStep = 0; draft = {}; showStep(); draw(); });
+  $('keepBtn').addEventListener('click', () => { if (backup) { gate = backup; enterTest(); } });
+  $('hdrRedo').addEventListener('click', () => { const keep = mode === 'setup' ? backup : gate; enterSetup(); backup = keep; $('keepBtn').hidden = !keep; });
+  function saveGate(g) { gatesBy[orient()] = g; store.set('duo.gates.' + role, gatesBy); gate = g; }
+  function enterTest() { setMode('test'); det = buildGate(gate); draw(); }
+
+  let dragging = null, loupe = null;
+  const toNorm = e => { const r = overlay.getBoundingClientRect();
+    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
+  overlay.addEventListener('pointerdown', e => {
+    if (mode === 'setup') { loupe = toNorm(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); draw(); return; }
+    if (mode !== 'test' || !gate) return;
+    const r = overlay.getBoundingClientRect(); let best = null, bestD = 34;
+    for (const end of ['a', 'b']) {
+      const d = Math.hypot(gate[end].x * r.width - (e.clientX - r.left), gate[end].y * r.height - (e.clientY - r.top));
+      if (d < bestD) { bestD = d; best = end; }
+    }
+    if (!best) return;
+    dragging = best; loupe = toNorm(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); draw();
+  });
+  overlay.addEventListener('pointermove', e => { if (!loupe) return; loupe = toNorm(e); if (dragging) gate[dragging] = loupe; draw(); });
+  const endTouch = cancel => {
+    if (!loupe) return;
+    const p = loupe; loupe = null;
+    if (dragging) { dragging = null; saveGate(gate); det = buildGate(gate); beep(990, 0.05); draw(); return; }
+    if (mode === 'setup' && !cancel) {
+      beep(990, 0.05);
+      if (setupStep === 0) { draft = { a: p }; setupStep = 1; showStep(); draw(); }
+      else { draft.b = p; saveGate(draft); enterTest(); }
+    } else draw();
+  };
+  overlay.addEventListener('pointerup', () => endTouch(false));
+  overlay.addEventListener('pointercancel', () => endTouch(true));
+
+  // ---------- detector (same as the single-camera version) ----------
+  const sensEl = $('sens'); sensEl.value = sens; $('sensVal').textContent = sens;
+  sensEl.addEventListener('input', () => { sens = +sensEl.value; $('sensVal').textContent = sens; store.set('duo.sens', sens); });
+  const pixThresh = () => 40 - sens * 2.5;
+  const minRun = long => Math.max(5, Math.round((0.2 + 0.18 * (11 - sens)) / 100 * long));
+  function buildGate(g) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const sc = Math.min(1920, Math.max(vw, vh)) / Math.max(vw, vh);
+    const DW = vw * sc, DH = vh * sc;
+    const ax = g.a.x * DW, ay = g.a.y * DH, bx = g.b.x * DW, by = g.b.y * DH, pad = 6;
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - pad)), y0 = Math.max(0, Math.floor(Math.min(ay, by) - pad));
+    const x1 = Math.min(Math.floor(DW), Math.ceil(Math.max(ax, bx) + pad)), y1 = Math.min(Math.floor(DH), Math.ceil(Math.max(ay, by) + pad));
+    const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    const len = Math.max(1, Math.hypot(bx - ax, by - ay)), n = Math.max(12, Math.round(len));
+    const nx = -(by - ay) / len, ny = (bx - ax) / len, idx = [], slots = [];
+    for (let i = 0; i <= n; i++) {
+      const px = ax + (bx - ax) * i / n, py = ay + (by - ay) * i / n, from = idx.length;
+      for (let o = -3; o <= 3; o++) {
+        const x = Math.round(px + nx * o) - x0, y = Math.round(py + ny * o) - y0;
+        if (x >= 0 && y >= 0 && x < cw && y < ch) idx.push((y * cw + x) * 4);
+      }
+      slots.push([from, idx.length]);
+    }
+    return { idx: Int32Array.from(idx), slots, bg: new Float32Array(idx.length), cur: new Float32Array(idx.length),
+             warm: 0, active: false, last: -1e9, level: 0, long: Math.max(DW, DH), cx, cw, ch, src: [x0 / sc, y0 / sc, cw / sc, ch / sc] };
+  }
+  function grab(d) { d.cx.drawImage(video, d.src[0], d.src[1], d.src[2], d.src[3], 0, 0, d.cw, d.ch); return d.cx.getImageData(0, 0, d.cw, d.ch).data; }
+  function analyse(d, px, now) {
+    const { idx, bg, cur } = d, n = idx.length; let sum = 0;
+    for (let i = 0; i < n; i++) { const k = idx[i], v = (px[k] + 2 * px[k + 1] + px[k + 2]) * 0.25; cur[i] = v; sum += v - bg[i]; }
+    if (d.warm < 15) { const a = d.warm === 0 ? 1 : 0.3; for (let i = 0; i < n; i++) bg[i] += (cur[i] - bg[i]) * a; d.warm++; d.level = 0; return; }
+    const shift = sum / n, th = pixThresh();
+    let run = 0, best = 0, gap = 0;
+    for (let s = 0; s < d.slots.length; s++) {
+      const [from, to] = d.slots[s]; let c = 0;
+      for (let i = from; i < to; i++) if (Math.abs(cur[i] - bg[i] - shift) > th) c++;
+      if (to > from && c * 2 > (to - from)) { run += 1 + gap; gap = 0; if (run > best) best = run; }
+      else if (run > 0 && gap < 2) gap++; else { run = 0; gap = 0; }
+    }
+    const level = best / minRun(d.long); d.level = level;
+    if (!d.active && level >= 1 && now - d.last > 800) { d.active = true; d.last = now; onCross(now); }
+    else if (d.active && level < 0.4) d.active = false;
+    const rate = level < 0.5 ? 0.05 : 0.003;
+    for (let i = 0; i < n; i++) bg[i] += (cur[i] - bg[i]) * rate;
+  }
+
+  // ---------- frame loop ----------
+  // Crossing times use this device's clock. When the browser reports when the camera captured
+  // the frame, use that; otherwise use the moment the frame arrived.
+  function startLoop() {
+    const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+    const step = (cbNow, meta) => {
+      let t = (cbNow !== undefined ? cbNow : performance.now());
+      if (meta && typeof meta.captureTime === 'number' && Math.abs(meta.captureTime - t) < 1000) t = meta.captureTime;
+      t += (window.__skew || 0);
+      if (mode === 'test' && det && video.readyState >= 2) {
+        pctx.drawImage(video, 0, 0, PROC_W, PROC_H);
+        const px = pctx.getImageData(0, 0, PROC_W, PROC_H).data;
+        if (cameraMoving(px, t)) { det.warm = 0; det.level = 0; det.active = false; }
+        else analyse(det, grab(det), t);
+        $('mGate').style.width = Math.min(100, det.level * 50) + '%';
+        $('gCard').classList.toggle('hot', det.active);
+        draw();
+      }
+      hasRVFC ? video.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+    };
+    hasRVFC ? video.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+  }
+  let moving = false, movingUntil = 0, prevGrid = null, prevLen = 0;
+  function cameraMoving(px, now) {
+    const step = 8, n = Math.floor(PROC_W / step) * Math.floor(PROC_H / step);
+    if (!prevGrid || prevLen !== n) { prevGrid = new Float32Array(n); prevLen = n; }
+    let i = 0, changed = 0;
+    for (let y = step >> 1; y < PROC_H; y += step) for (let x = step >> 1; x < PROC_W; x += step) {
+      if (i >= n) break;
+      const k = (y * PROC_W + x) * 4, v = (px[k] + 2 * px[k + 1] + px[k + 2]) * 0.25;
+      if (Math.abs(v - prevGrid[i]) > 22) changed++; prevGrid[i++] = v;
+    }
+    if (changed / n > 0.25) movingUntil = now + 1200;
+    const m = now < movingUntil;
+    if (m !== moving) {
+      moving = m; $('moveBanner').hidden = !m;
+      if (m && (runStartAt !== null || startPending)) { cancelRun(true); log('Camera moved, run cancelled'); }
+    }
+    return m;
+  }
+
+  // ---------- drawing ----------
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  function draw() {
+    const w = overlay.clientWidth, h = overlay.clientHeight;
+    octx.clearRect(0, 0, w, h);
+    const g = mode === 'setup' ? draft : gate;
+    if (g && g.a) drawGate(g, role === 'finish' ? 'FINISH' : 'START', css(role === 'finish' ? '--stop' : '--go'), det && det.active, w, h);
+    if (loupe) drawLoupe(w, h);
+  }
+  function drawGate(g, label, color, hot, w, h) {
+    const ax = g.a.x * w, ay = g.a.y * h; octx.lineCap = 'round';
+    if (g.b) {
+      const bx = g.b.x * w, by = g.b.y * h;
+      octx.strokeStyle = 'rgba(0,0,0,.55)'; octx.lineWidth = hot ? 12 : 8; octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
+      octx.strokeStyle = hot ? css('--amber') : color; octx.lineWidth = hot ? 8 : 4; octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
+      octx.fillStyle = '#fff'; octx.strokeStyle = color; octx.lineWidth = 3; octx.beginPath(); octx.arc(bx, by, 8, 0, Math.PI * 2); octx.fill(); octx.stroke();
+    }
+    octx.fillStyle = color; octx.strokeStyle = '#fff'; octx.lineWidth = 2; octx.beginPath(); octx.arc(ax, ay, 9, 0, Math.PI * 2); octx.fill(); octx.stroke();
+    octx.font = '800 15px "Barlow Condensed", "Arial Narrow", sans-serif';
+    const tw = octx.measureText(label).width, lx = Math.min(Math.max(ax - tw / 2 - 6, 4), w - tw - 16), ly = ay > 34 ? ay - 32 : ay + 14;
+    octx.fillStyle = 'rgba(0,0,0,.7)'; octx.fillRect(lx, ly, tw + 12, 20); octx.fillStyle = '#fff'; octx.fillText(label, lx + 6, ly + 15);
+  }
+  function drawLoupe(w, h) {
+    const R = Math.min(80, Math.max(56, Math.min(w, h) * 0.2)), Z = 3, fx = loupe.x * w, fy = loupe.y * h;
+    let cx = fx, cy = fy - R - 40; if (cy - R < 0) cy = fy + R + 40;
+    cx = Math.min(Math.max(cx, R + 4), w - R - 4); cy = Math.min(Math.max(cy, R + 4), h - R - 4);
+    const vpc = video.videoWidth / w, sw = (2 * R / Z) * vpc;
+    octx.save(); octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.closePath(); octx.clip();
+    octx.fillStyle = '#000'; octx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+    try { octx.drawImage(video, fx * vpc - sw / 2, fy * vpc - sw / 2, sw, sw, cx - R, cy - R, 2 * R, 2 * R); } catch (e) {}
+    octx.restore();
+    octx.strokeStyle = '#fff'; octx.lineWidth = 3; octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.stroke();
+    octx.strokeStyle = css('--amber'); octx.lineWidth = 2; octx.beginPath();
+    octx.moveTo(cx - 14, cy); octx.lineTo(cx - 4, cy); octx.moveTo(cx + 4, cy); octx.lineTo(cx + 14, cy);
+    octx.moveTo(cx, cy - 14); octx.lineTo(cx, cy - 4); octx.moveTo(cx, cy + 4); octx.lineTo(cx, cy + 14); octx.stroke();
+    octx.fillStyle = css('--amber'); octx.beginPath(); octx.arc(fx, fy, 4, 0, Math.PI * 2); octx.fill();
+  }
+})();
+</script>
+</body>
+</html>
