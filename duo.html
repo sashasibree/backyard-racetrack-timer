@@ -590,7 +590,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 
   // ---------- lenses ----------
   let lenses = { wide: null, ultra: null }, currentDeviceId = null;
-  let lensChoice = store.get('duo.lens', '0.5x');
+  let lensChoice = store.get('duo.lens', '1x');   // devices sit close to their gate, so the normal lens keeps the car big
   async function openCamera(deviceId) {
     if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
     const base = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
