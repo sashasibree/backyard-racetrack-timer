@@ -1,0 +1,9 @@
+{
+  "name": "Backyard Race Timer (single camera)",
+  "short_name": "Race 1-cam",
+  "start_url": "./single.html",
+  "display": "standalone",
+  "background_color": "#121411",
+  "theme_color": "#121411",
+  "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }, { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }]
+}

@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Backyard Race Timer</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Race Timer">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="single.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen app. Camera stage fills the top (or left in landscape); control panel below (or right). */
+:root {
+  --bg: #eef0ea;          /* dusty daylight */
+  --surface: #ffffff;
+  --ink: #1b1f1a;
+  --muted: #5d665a;
+  --line: #d4d9cf;
+  --go: #19a058;          /* start gate / ready */
+  --stop: #d8342b;        /* finish gate */
+  --amber: #e8a317;
+  --stage: #0d0f0c;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --body: "Barlow", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121411; --surface: #1c1f1b; --ink: #eef1ea; --muted: #9aa396; --line: #2f342d;
+    --go: #2fc173; --stop: #f0554b; --amber: #f2b632; --stage: #000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121411; --surface: #1c1f1b; --ink: #eef1ea; --muted: #9aa396; --line: #2f342d;
+  --go: #2fc173; --stop: #f0554b; --amber: #f2b632; --stage: #000;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; overflow-x: hidden; }
+body {
+  background: var(--bg); color: var(--ink); font: 16px/1.4 var(--body);
+  -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+}
+.app {
+  height: 100%; display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1 { min-width: 0; margin: 0; font: 800 22px/1 var(--display); letter-spacing: .02em; text-transform: uppercase; }
+h1 span { color: var(--stop); }
+.hdrBtns { display: flex; align-items: center; gap: 8px; }
+button.small { padding: 8px 12px; font-size: 14px; border-color: var(--ink); }
+.mode {
+  white-space: nowrap;
+  font: 700 13px/1 var(--display); letter-spacing: .12em; text-transform: uppercase;
+  padding: 6px 10px; border-radius: 999px; background: var(--line); color: var(--ink);
+}
+.mode.test { background: var(--amber); color: #1b1f1a; }
+.mode.setup { background: var(--ink); color: var(--bg); }
+
+.stageWrap { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--stage); overflow: hidden; }
+.stage { position: relative; }
+.stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage canvas { touch-action: none; }
+.banner {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 20px);
+  background: var(--stop); color: #fff; padding: 6px 12px; border-radius: 8px; text-align: center; width: max-content;
+  font: 700 14px/1.1 var(--display); letter-spacing: .06em; text-transform: uppercase; pointer-events: none;
+}
+.setupCard { background: var(--surface); border: 2px solid var(--ink); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
+.stepNo { font: 700 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.stepTitle { font: 800 24px/1.05 var(--display); text-transform: uppercase; }
+.stepTitle .s { color: var(--go); } .stepTitle .f { color: var(--stop); }
+.stepSub { margin: 0; font-size: 14px; color: var(--muted); }
+.tip { margin: 0; font-size: 13px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; }
+.lens { display: flex; gap: 6px; align-items: center; }
+.lens span { font-size: 13px; color: var(--muted); margin-right: 2px; }
+.lens button { padding: 8px 12px; font-size: 15px; }
+.lens button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+#testArea { display: grid; gap: 12px; }
+@media (orientation: landscape) { .rotateTip { display: none; } }
+
+.panel {
+  display: grid; gap: 12px; align-content: start; overflow-y: auto; max-height: 46vh;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-top: 1px solid var(--line); background: var(--bg);
+}
+.gates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gate { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+.gate .top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; }
+.gate .top > span:last-child { white-space: nowrap; }
+.gate .name { font: 800 16px/1 var(--display); letter-spacing: .1em; }
+.gate.start .name { color: var(--go); }
+.gate.finish .name { color: var(--stop); }
+.gate .count { font: 700 26px/1 var(--display); font-variant-numeric: tabular-nums; }
+.gate .unit { font-size: 12px; color: var(--muted); }
+.meter { position: relative; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--muted); transition: width 60ms linear; }
+.gate.hot .meter i { background: var(--amber); }
+.meter b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
+.gate.flash { animation: flash .5s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 4px var(--amber); } to { box-shadow: 0 0 0 0 transparent; } }
+
+.run { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.run .label { font: 700 13px/1.2 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.run .time { font: 800 44px/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.run .time.live { color: var(--amber); }
+.run { flex-wrap: wrap; }
+.stopBtn { flex: 1 1 100%; background: var(--stop); border-color: var(--stop); color: #fff; padding: 14px; font-size: 18px; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.slider { flex: 1 1 200px; display: grid; gap: 4px; }
+.slider label { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+input[type=range] { width: 100%; accent-color: var(--go); }
+button {
+  font: 700 16px/1 var(--display); letter-spacing: .08em; text-transform: uppercase;
+  padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer;
+}
+button.primary { background: var(--go); border-color: var(--go); color: #fff; }
+button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.hint { margin: 0; font-size: 14px; color: var(--muted); }
+.log { margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+
+/* Start screen */
+.intro { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: var(--stage); z-index: 5; }
+.intro .card { background: var(--surface); color: var(--ink); border-radius: 14px; padding: 22px; max-width: 420px; display: grid; gap: 12px; }
+.intro h2 { margin: 0; font: 800 28px/1.05 var(--display); text-transform: uppercase; text-wrap: balance; }
+.intro p { margin: 0; color: var(--muted); }
+.intro ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.err { color: var(--stop); font-weight: 600; }
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .app { grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) minmax(230px, 30%); }
+  header { grid-column: 1 / -1; padding-block: 4px; }
+  h1 { font-size: 18px; }
+  .panel { max-height: none; min-height: 0; border-top: 0; border-left: 1px solid var(--line); gap: 10px; padding-block: 8px; }
+  .gates { grid-template-columns: 1fr; gap: 8px; }
+  .gate { padding: 8px 10px; }
+  .run .time { font-size: 34px; }
+  .hint { font-size: 13px; }
+  .stepTitle { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .gate.flash { animation: none; } .meter i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Backyard <span>Race</span> Timer</h1>
+    <div class="hdrBtns">
+      <button class="small" id="hdrRedo" hidden>Redo gates</button>
+      <span class="mode" id="modeChip">Off</span>
+    </div>
+  </header>
+
+  <div class="stageWrap" id="stageWrap">
+    <div class="stage" id="stage">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+      <div class="banner" id="moveBanner" hidden>Camera moving. Keep the phone still.</div>
+    </div>
+    <div class="intro" id="intro">
+      <div class="card">
+        <h2>Gate test</h2>
+        <p>This version checks that the camera can see the car cross each gate. No times are saved yet.</p>
+        <ol>
+          <li>Mount the phone sideways so it sees both rocks, and keep it still.</li>
+          <li>Turn the volume up and the ringer switch on.</li>
+          <li>Tap Start camera, then mark the gates.</li>
+        </ol>
+        <button class="primary" id="startBtn">Start camera</button>
+        <p class="err" id="err" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel" id="panel" hidden>
+    <p class="tip rotateTip">Turn the phone sideways for a bigger picture. If the picture turns but the app does not, swipe down from the top-right corner and turn off Portrait Orientation Lock.</p>
+
+    <div class="setupCard" id="setupCard" hidden>
+      <div class="stepNo" id="stepNo">Step 1 of 4</div>
+      <div class="stepTitle" id="stepTitle"></div>
+      <p class="stepSub" id="stepSub"></p>
+      <div class="row"><button id="undoBtn">Undo tap</button><button id="keepBtn" hidden>Keep old gates</button></div>
+    </div>
+
+    <div class="lens" id="lensRow" hidden><span>Lens</span></div>
+
+    <div id="testArea">
+    <div class="gates">
+      <div class="gate start" id="gStart">
+        <div class="top"><span class="name">START</span><span><span class="count" id="cStart">0</span> <span class="unit">hits</span></span></div>
+        <div class="meter"><i id="mStart"></i><b id="tStart"></b></div>
+      </div>
+      <div class="gate finish" id="gFinish">
+        <div class="top"><span class="name">FINISH</span><span><span class="count" id="cFinish">0</span> <span class="unit">hits</span></span></div>
+        <div class="meter"><i id="mFinish"></i><b id="tFinish"></b></div>
+      </div>
+    </div>
+
+    <div class="run">
+      <span class="label">Test run<br>start to finish</span>
+      <span class="time" id="runTime">--.--</span>
+      <button class="stopBtn" id="stopBtn" hidden>Stop timer</button>
+    </div>
+
+    <p class="hint" id="hint">Drive the car through each gate. You should hear a high beep at START and a double beep at FINISH. The bar shows how much the gate sees; crossing the black mark counts as a hit. To fine-tune a line, drag its dots on the picture. For a far-away car, raise Sensitivity.</p>
+
+    <div class="row">
+      <div class="slider">
+        <label for="sens"><span>Sensitivity</span><span id="sensVal">5</span></label>
+        <input type="range" id="sens" min="1" max="10" step="1" value="5">
+      </div>
+    </div>
+    <div class="row">
+      <button id="redoBtn">Redo gates</button>
+      <button id="resetBtn">Reset counts</button>
+    </div>
+    <ul class="log" id="log"></ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+  const stage = $('stage'), stageWrap = $('stageWrap');
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  // ---------- state ----------
+  // Gate lines are kept per picture shape, because iOS turns the camera image when the phone rotates.
+  let gatesBy = store.get('rt.gates2', {});     // {land:{start:{a,b},finish:{a,b}}, port:{...}} in 0..1 video coords
+  let gates = null;
+  const orient = () => (video.videoWidth >= video.videoHeight ? 'land' : 'port');
+  function saveGates(g) { gatesBy[orient()] = g; store.set('rt.gates2', gatesBy); gates = g; }
+  let sens = store.get('rt.sens', 5);
+  let mode = 'off';                              // off | setup | test
+  let setupStep = 0;                             // 0 startA, 1 startB, 2 finishA, 3 finishB
+  let draft = {};
+  let det = {};                                  // per-gate detector state
+  let counts = { start: 0, finish: 0 };
+  let runStartAt = null, liveStartAt = 0, liveTimer = null;
+  const PROC_W = 320; let PROC_H = 180;
+  const proc = document.createElement('canvas');
+  const pctx = proc.getContext('2d', { willReadFrequently: true });
+
+  // ---------- audio + voice ----------
+  let actx = null;
+  function beep(freq, dur = 0.12, when = 0) {
+    if (!actx) return;
+    const t = actx.currentTime + when;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function say(text) {
+    try { if (!window.speechSynthesis) return; speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; speechSynthesis.speak(u); } catch (e) {}
+  }
+
+  // ---------- wake lock ----------
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode !== 'off') keepAwake(); });
+
+  // ---------- camera ----------
+  $('startBtn').addEventListener('click', async () => {
+    const err = $('err'); err.hidden = true;
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); await actx.resume(); beep(660, 0.05); } catch (e) {}
+    try { if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch (e) {}
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      err.textContent = 'The camera only works when this page is opened from its https link (GitHub Pages), not from a saved file.';
+      err.hidden = false; return;
+    }
+    try {
+      await openCamera(null);                          // first open asks permission so lens names become visible
+      await findLenses();
+      const want = lensChoice === '1x' ? lenses.wide : (lenses.ultra || lenses.wide);
+      if (want && want !== currentDeviceId) await openCamera(want);
+      renderLensButtons();
+      $('intro').hidden = true; $('panel').hidden = false; $('hdrRedo').hidden = false;
+      layout(); keepAwake();
+      gates = gatesBy[orient()] || null; lastOrient = orient();
+      if (gates) enterTest(); else enterSetup();
+      startLoop();
+    } catch (e) {
+      err.textContent = (e && e.name === 'NotAllowedError')
+        ? 'Camera access was blocked. On iPhone open Settings, Safari, Camera, choose Allow, then reload this page.'
+        : 'Could not start the camera (' + (e && e.name || 'error') + '). Close other camera apps and try again.';
+      err.hidden = false;
+    }
+  });
+
+  // ---------- lenses (1x wide, 0.5x ultra wide) ----------
+  let lenses = { wide: null, ultra: null }, currentDeviceId = null;
+  let lensChoice = store.get('rt.lens', '0.5x');
+  async function openCamera(deviceId) {
+    if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+    const base = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: 'environment' } }
+    });
+    video.srcObject = stream;
+    const track = stream.getVideoTracks()[0];
+    currentDeviceId = (track.getSettings && track.getSettings().deviceId) || deviceId;
+    await video.play();
+    await new Promise(r => video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true }));
+    PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth);
+    proc.width = PROC_W; proc.height = PROC_H;
+  }
+  async function findLenses() {
+    try {
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const back = cams.filter(d => !/front/i.test(d.label));
+      lenses.ultra = (back.find(d => /ultra/i.test(d.label)) || {}).deviceId || null;
+      lenses.wide = (back.find(d => /^back camera$/i.test(d.label.trim())) ||
+                     back.find(d => !/ultra|tele|dual|triple/i.test(d.label)) || {}).deviceId || currentDeviceId;
+    } catch (e) {}
+  }
+  function renderLensButtons() {
+    const row = $('lensRow');
+    row.querySelectorAll('button').forEach(b => b.remove());
+    if (!lenses.ultra) { row.hidden = true; return; }
+    for (const [label, id] of [['0.5x', lenses.ultra], ['1x', lenses.wide]]) {
+      const b = document.createElement('button');
+      b.textContent = label; b.setAttribute('aria-pressed', String(id === currentDeviceId));
+      b.addEventListener('click', async () => {
+        if (id === currentDeviceId) return;
+        lensChoice = label; store.set('rt.lens', label);
+        try { await openCamera(id); } catch (e) { return; }
+        renderLensButtons(); layout();
+        gatesBy = {}; store.set('rt.gates2', gatesBy); gates = null;   // the picture changed, so the gate lines must be redrawn
+        enterSetup();
+      });
+      row.append(b);
+    }
+    row.hidden = false;
+  }
+
+  // ---------- layout: fit video inside the stage area, keep aspect ----------
+  let lastOrient = null;
+  function layout() {
+    if (!video.videoWidth) return;
+    const ar = video.videoWidth / video.videoHeight;
+    const W = stageWrap.clientWidth, H = stageWrap.clientHeight;
+    let w = W, h = W / ar;
+    if (h > H) { h = H; w = H * ar; }
+    stage.style.width = w + 'px'; stage.style.height = h + 'px';
+    const dpr = window.devicePixelRatio || 1;
+    overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr);
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const o = orient();
+    if (lastOrient && o !== lastOrient && mode !== 'off') {   // phone rotated: camera picture changed shape
+      PROC_H = Math.round(PROC_W * video.videoHeight / video.videoWidth);
+      proc.width = PROC_W; proc.height = PROC_H;
+      gates = gatesBy[o] || null;
+      gates ? enterTest() : enterSetup();
+    }
+    lastOrient = o;
+    draw();
+  }
+  window.addEventListener('resize', () => setTimeout(layout, 150));
+  window.addEventListener('orientationchange', () => setTimeout(layout, 400));
+  video.addEventListener('resize', () => setTimeout(layout, 50));   // fires when iOS turns the camera image
+
+  // ---------- setup (tap rocks) ----------
+  const steps = [
+    ['s', 'Tap the START rock', 'Touch the picture, slide until the magnifier crosshair is on the rock, then lift.'],
+    ['s', 'Tap across the track', 'Same way: put the crosshair on the far side of the track, straight across from the START rock.'],
+    ['f', 'Tap the FINISH rock', 'Touch, slide the crosshair onto the FINISH rock, then lift.'],
+    ['f', 'Tap across the track', 'Put the crosshair on the far side of the track, straight across from the FINISH rock.']
+  ];
+  function setMode(m) {
+    mode = m; const chip = $('modeChip');
+    chip.textContent = m === 'setup' ? 'Mark gates' : m === 'test' ? 'Gate test' : 'Off';
+    chip.className = 'mode ' + m;
+    $('setupCard').hidden = m !== 'setup';
+    $('hdrRedo').textContent = m === 'setup' ? 'Start over' : 'Redo gates';
+    $('testArea').hidden = m !== 'test';
+  }
+  let backupGates = null;
+  function enterSetup() {
+    backupGates = gates;
+    setMode('setup'); setupStep = 0; draft = {}; det = {};
+    $('keepBtn').hidden = !backupGates;
+    moving = false; $('moveBanner').hidden = true;
+    showStep(); draw();
+  }
+  function showStep() {
+    const [k, t, sub] = steps[setupStep];
+    $('stepNo').textContent = 'Step ' + (setupStep + 1) + ' of 4';
+    const title = $('stepTitle'); title.innerHTML = '';
+    const word = k === 's' ? 'START' : 'FINISH';
+    if (t.includes(word)) {
+      const [pre, post] = t.split(word);
+      const em = document.createElement('span'); em.className = k; em.textContent = word;
+      title.append(pre, em, post);
+    } else title.textContent = t;
+    $('stepSub').textContent = sub;
+    $('undoBtn').disabled = setupStep === 0;
+  }
+  $('undoBtn').addEventListener('click', () => {
+    if (setupStep === 0) return;
+    setupStep--;
+    if (setupStep === 0) delete draft.start;
+    else if (setupStep === 1) delete draft.start.b;
+    else if (setupStep === 2) delete draft.finish;
+    else delete draft.finish.b;
+    showStep(); draw();
+  });
+  $('keepBtn').addEventListener('click', () => { if (backupGates) { gates = backupGates; enterTest(); } });
+  // Touch handling. While a finger is down, a magnifier shows the spot under it, and the
+  // dot lands where the finger lifts. In test mode the same works for dragging existing dots.
+  let dragging = null, loupe = null;
+  const toNorm = e => { const r = overlay.getBoundingClientRect();
+    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
+  overlay.addEventListener('pointerdown', e => {
+    if (mode === 'setup') {
+      loupe = toNorm(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); draw(); return;
+    }
+    if (mode !== 'test' || !gates) return;
+    const r = overlay.getBoundingClientRect(); let best = null, bestD = 34;
+    for (const g of ['start', 'finish']) for (const end of ['a', 'b']) {
+      const pt = gates[g][end], d = Math.hypot(pt.x * r.width - (e.clientX - r.left), pt.y * r.height - (e.clientY - r.top));
+      if (d < bestD) { bestD = d; best = { g, end }; }
+    }
+    if (!best) return;
+    dragging = best; loupe = toNorm(e); overlay.setPointerCapture(e.pointerId); e.preventDefault(); draw();
+  });
+  overlay.addEventListener('pointermove', e => {
+    if (!loupe) return;
+    loupe = toNorm(e);
+    if (dragging) gates[dragging.g][dragging.end] = loupe;
+    draw();
+  });
+  function placeSetupPoint(p) {
+    if (setupStep === 0) draft.start = { a: p };
+    else if (setupStep === 1) draft.start.b = p;
+    else if (setupStep === 2) draft.finish = { a: p };
+    else draft.finish.b = p;
+    beep(990, 0.05);
+    setupStep++;
+    if (setupStep > 3) { saveGates(draft); enterTest(); }
+    else { showStep(); draw(); }
+  }
+  const endTouch = (cancel) => {
+    if (!loupe) return;
+    const p = loupe; loupe = null;
+    if (dragging) {
+      const g = dragging.g; dragging = null;
+      saveGates(gates); det[g] = buildGate(gates[g]); beep(990, 0.05); draw();
+    } else if (mode === 'setup' && !cancel) placeSetupPoint(p);
+    else draw();
+  };
+  overlay.addEventListener('pointerup', () => endTouch(false));
+  overlay.addEventListener('pointercancel', () => endTouch(true));
+
+  // ---------- test mode ----------
+  function enterTest() {
+    setMode('test');
+    det = { start: buildGate(gates.start), finish: buildGate(gates.finish) };
+    updateThresholdMarks(); draw();
+    say('Gates set. Drive through each gate to test.');
+  }
+  $('redoBtn').addEventListener('click', enterSetup);
+  $('hdrRedo').addEventListener('click', () => {
+    if (mode === 'setup') { const keep = backupGates; enterSetup(); backupGates = keep; $('keepBtn').hidden = !keep; }
+    else enterSetup();
+  });
+  $('resetBtn').addEventListener('click', () => {
+    counts = { start: 0, finish: 0 }; $('cStart').textContent = '0'; $('cFinish').textContent = '0';
+    runStartAt = null; stopLive(); $('runTime').textContent = '--.--'; $('log').innerHTML = '';
+  });
+  const sensEl = $('sens'); sensEl.value = sens; $('sensVal').textContent = sens;
+  sensEl.addEventListener('input', () => {
+    sens = +sensEl.value; $('sensVal').textContent = sens; store.set('rt.sens', sens); updateThresholdMarks();
+  });
+  // Higher sensitivity = smaller brightness change counts, and a shorter covered stretch is enough.
+  const pixThresh = () => 40 - sens * 2.5;          // 37.5 .. 15 (0-255 brightness)
+  // Covered stretch needed along a gate line, as a share of the picture's long side:
+  // sensitivity 1 = 2%, 5 = 1.3%, 10 = 0.4%. "long" is the long side in the gate's pixels.
+  const minRun = long => Math.max(5, Math.round((0.2 + 0.18 * (11 - sens)) / 100 * long));
+  function updateThresholdMarks() {                 // meter runs 0..2x the needed stretch; the mark sits at 1x
+    $('tStart').style.left = '50%'; $('tFinish').style.left = '50%';
+  }
+
+  // ---------- detector ----------
+  // Each gate reads its own small crop of the camera picture at high detail, instead of a
+  // shrunken copy of the whole picture, so a small or distant car covers more pixels.
+  function buildGate(g) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const sc = Math.min(1920, Math.max(vw, vh)) / Math.max(vw, vh);   // full camera detail (capped at 1920)
+    const DW = vw * sc, DH = vh * sc;
+    const ax = g.a.x * DW, ay = g.a.y * DH, bx = g.b.x * DW, by = g.b.y * DH;
+    const pad = 6;
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - pad)), y0 = Math.max(0, Math.floor(Math.min(ay, by) - pad));
+    const x1 = Math.min(Math.floor(DW), Math.ceil(Math.max(ax, bx) + pad)), y1 = Math.min(Math.floor(DH), Math.ceil(Math.max(ay, by) + pad));
+    const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    const len = Math.max(1, Math.hypot(bx - ax, by - ay));
+    const n = Math.max(12, Math.round(len));
+    const nx = -(by - ay) / len, ny = (bx - ax) / len;
+    const idx = [], slots = [];
+    for (let i = 0; i <= n; i++) {
+      const px = ax + (bx - ax) * i / n, py = ay + (by - ay) * i / n;
+      const from = idx.length;
+      for (let o = -3; o <= 3; o++) {
+        const x = Math.round(px + nx * o) - x0, y = Math.round(py + ny * o) - y0;
+        if (x >= 0 && y >= 0 && x < cw && y < ch) idx.push((y * cw + x) * 4);
+      }
+      slots.push([from, idx.length]);
+    }
+    return { idx: Int32Array.from(idx), slots, bg: new Float32Array(idx.length), cur: new Float32Array(idx.length),
+             warm: 0, active: false, last: -1e9, level: 0, long: Math.max(DW, DH),
+             cx, cw, ch, src: [x0 / sc, y0 / sc, cw / sc, ch / sc] };
+  }
+  function grab(d) {
+    d.cx.drawImage(video, d.src[0], d.src[1], d.src[2], d.src[3], 0, 0, d.cw, d.ch);
+    return d.cx.getImageData(0, 0, d.cw, d.ch).data;
+  }
+  function analyse(d, px, now, name) {
+    const { idx, bg, cur } = d, n = idx.length;
+    let sum = 0;
+    for (let i = 0; i < n; i++) { const k = idx[i]; const v = (px[k] + 2 * px[k + 1] + px[k + 2]) * 0.25; cur[i] = v; sum += v - bg[i]; }
+    if (d.warm < 15) {                       // learn the empty gate for ~half a second
+      const a = d.warm === 0 ? 1 : 0.3;
+      for (let i = 0; i < n; i++) bg[i] += (cur[i] - bg[i]) * a;
+      d.warm++; d.level = 0; return;
+    }
+    const shift = sum / n;                   // cancels a cloud or shadow that brightens/darkens the whole line
+    const th = pixThresh();
+    // A spot along the line counts as "covered" when most of its 7-pixel band changed.
+    // The car only covers a short piece of a line that spans the track, so we look for
+    // the longest unbroken covered stretch instead of a share of the whole line.
+    let run = 0, best = 0, gap = 0;
+    for (let s = 0; s < d.slots.length; s++) {
+      const [from, to] = d.slots[s]; let c = 0;
+      for (let i = from; i < to; i++) if (Math.abs(cur[i] - bg[i] - shift) > th) c++;
+      if (to > from && c * 2 > (to - from)) { run += 1 + gap; gap = 0; if (run > best) best = run; }
+      else if (run > 0 && gap < 2) gap++;    // tolerate a small break
+      else { run = 0; gap = 0; }
+    }
+    const need = minRun(d.long);
+    const level = best / need; d.level = level;
+    if (!d.active && level >= 1 && now - d.last > 800) { d.active = true; d.last = now; onCross(name, now); }
+    else if (d.active && level < 0.4) d.active = false;
+    const rate = level < 0.5 ? 0.05 : 0.003;   // adapt fast when quiet, very slowly when something is in the gate
+    for (let i = 0; i < n; i++) bg[i] += (cur[i] - bg[i]) * rate;
+  }
+
+  function onCross(name, now) {
+    counts[name]++; $(name === 'start' ? 'cStart' : 'cFinish').textContent = counts[name];
+    const card = $(name === 'start' ? 'gStart' : 'gFinish');
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+    let note = '';
+    if (name === 'start') {
+      beep(1320, 0.14);
+      runStartAt = now; liveStartAt = performance.now(); startLive(); note = 'START hit, timing test run';
+    } else {
+      beep(880, 0.1); beep(1320, 0.16, 0.14);
+      if (runStartAt !== null && now - runStartAt > 300) {
+        const s = (now - runStartAt) / 1000; stopLive();
+        $('runTime').textContent = s.toFixed(2); runStartAt = null;
+        note = 'FINISH hit, test run ' + s.toFixed(2) + ' s';
+        setTimeout(() => say(s.toFixed(2) + ' seconds'), 450);
+      } else note = 'FINISH hit';
+    }
+    const li = document.createElement('li');
+    li.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) + '  ' + note;
+    const log = $('log'); log.prepend(li); while (log.children.length > 6) log.lastChild.remove();
+  }
+  function startLive() {
+    stopLive(); const el = $('runTime'); el.classList.add('live'); $('stopBtn').hidden = false;
+    liveTimer = setInterval(() => { if (runStartAt !== null) el.textContent = ((performance.now() - liveStartAt) / 1000).toFixed(2); }, 50);
+  }
+  function stopLive() { if (liveTimer) clearInterval(liveTimer); liveTimer = null; $('runTime').classList.remove('live'); $('stopBtn').hidden = true; }
+  $('stopBtn').addEventListener('click', () => {
+    runStartAt = null; stopLive(); $('runTime').textContent = '--.--';
+    const li = document.createElement('li');
+    li.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) + '  Timer stopped and cleared';
+    $('log').prepend(li); beep(440, 0.15);
+  });
+
+  // ---------- frame loop ----------
+  function startLoop() {
+    const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+    // Use the camera's own frame time when the browser gives it, so a slow moment on the
+    // phone does not shift a crossing. Fall back to the clock if frame times are missing.
+    let lastMedia = -1, useMedia = null;
+    const step = (clock, meta) => {
+      if (useMedia === null) useMedia = !!(meta && typeof meta.mediaTime === 'number' && meta.mediaTime > 0);
+      let now = clock, fresh = true;
+      if (useMedia) {
+        const mt = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : -1;
+        if (mt < lastMedia - 1) { lastMedia = -1; runStartAt = null; stopLive(); for (const g of Object.values(det)) g.last = -1e9; } // camera restarted
+        fresh = mt > lastMedia; if (fresh) lastMedia = mt;
+        now = lastMedia * 1000;
+      }
+      if (fresh && mode === 'test' && video.readyState >= 2) {
+        pctx.drawImage(video, 0, 0, PROC_W, PROC_H);
+        const px = pctx.getImageData(0, 0, PROC_W, PROC_H).data;
+        if (cameraMoving(px, now)) {
+          // Whole picture is shifting: pause the gates and relearn them once the phone is still.
+          det.start.warm = 0; det.finish.warm = 0; det.start.level = 0; det.finish.level = 0;
+          det.start.active = false; det.finish.active = false;
+        } else {
+          analyse(det.start, grab(det.start), now, 'start');
+          analyse(det.finish, grab(det.finish), now, 'finish');
+        }
+        paintMeters(); draw();
+      }
+      hasRVFC ? video.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+    };
+    hasRVFC ? video.requestVideoFrameCallback(step) : requestAnimationFrame(step);
+  }
+  // Compare a sparse grid of the whole picture with the last frame. A car changes a small
+  // patch; a moving phone changes most of the picture at once.
+  let moving = false, movingUntil = 0, prevGrid = null, prevLen = 0;
+  function cameraMoving(px, now) {
+    const step = 8, n = Math.floor(PROC_W / step) * Math.floor(PROC_H / step);
+    if (!prevGrid || prevLen !== n) { prevGrid = new Float32Array(n); prevLen = n; }
+    let i = 0, changed = 0;
+    for (let y = step >> 1; y < PROC_H; y += step) for (let x = step >> 1; x < PROC_W; x += step) {
+      if (i >= n) break;
+      const k = (y * PROC_W + x) * 4, v = (px[k] + 2 * px[k + 1] + px[k + 2]) * 0.25;
+      if (Math.abs(v - prevGrid[i]) > 22) changed++;
+      prevGrid[i++] = v;
+    }
+    if (changed / n > 0.25) movingUntil = now + 1200;
+    const m = now < movingUntil;
+    if (m !== moving) {
+      moving = m; $('moveBanner').hidden = !m;
+      if (m) { runStartAt = null; stopLive(); }
+    }
+    return m;
+  }
+  function paintMeters() {
+    for (const [name, m, g] of [['start', 'mStart', 'gStart'], ['finish', 'mFinish', 'gFinish']]) {
+      const lvl = det[name] ? det[name].level : 0;
+      $(m).style.width = Math.min(100, lvl * 50) + '%';
+      $(g).classList.toggle('hot', !!(det[name] && det[name].active));
+    }
+  }
+
+  // ---------- overlay drawing ----------
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  function draw() {
+    const w = overlay.clientWidth, h = overlay.clientHeight;
+    octx.clearRect(0, 0, w, h);
+    const src = mode === 'setup' ? draft : gates;
+    if (!src) return;
+    drawGate(src.start, 'START', css('--go'), det.start && det.start.active, w, h);
+    drawGate(src.finish, 'FINISH', css('--stop'), det.finish && det.finish.active, w, h);
+    if (loupe) drawLoupe(w, h);
+  }
+  function drawLoupe(w, h) {
+    const R = Math.min(80, Math.max(56, Math.min(w, h) * 0.2)), Z = 3;
+    const fx = loupe.x * w, fy = loupe.y * h;
+    let cx = fx, cy = fy - R - 40;                       // sit above the finger
+    if (cy - R < 0) cy = fy + R + 40;                    // or below it near the top edge
+    cx = Math.min(Math.max(cx, R + 4), w - R - 4); cy = Math.min(Math.max(cy, R + 4), h - R - 4);
+    const vpc = video.videoWidth / w, sw = (2 * R / Z) * vpc;
+    octx.save();
+    octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.closePath(); octx.clip();
+    octx.fillStyle = '#000'; octx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+    try { octx.drawImage(video, fx * vpc - sw / 2, fy * vpc - sw / 2, sw, sw, cx - R, cy - R, 2 * R, 2 * R); } catch (e) {}
+    octx.restore();
+    octx.strokeStyle = '#fff'; octx.lineWidth = 3; octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.stroke();
+    octx.strokeStyle = css('--amber'); octx.lineWidth = 2;
+    octx.beginPath(); octx.moveTo(cx - 14, cy); octx.lineTo(cx - 4, cy); octx.moveTo(cx + 4, cy); octx.lineTo(cx + 14, cy);
+    octx.moveTo(cx, cy - 14); octx.lineTo(cx, cy - 4); octx.moveTo(cx, cy + 4); octx.lineTo(cx, cy + 14); octx.stroke();
+    octx.fillStyle = css('--amber'); octx.beginPath(); octx.arc(fx, fy, 4, 0, Math.PI * 2); octx.fill();
+  }
+  function drawGate(g, label, color, hot, w, h) {
+    if (!g || !g.a) return;
+    const ax = g.a.x * w, ay = g.a.y * h;
+    octx.lineCap = 'round';
+    if (g.b) {
+      const bx = g.b.x * w, by = g.b.y * h;
+      octx.strokeStyle = 'rgba(0,0,0,.55)'; octx.lineWidth = hot ? 12 : 8;
+      octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
+      octx.strokeStyle = hot ? css('--amber') : color; octx.lineWidth = hot ? 8 : 4;
+      octx.beginPath(); octx.moveTo(ax, ay); octx.lineTo(bx, by); octx.stroke();
+      octx.fillStyle = '#fff'; octx.strokeStyle = color; octx.lineWidth = 3;
+      octx.beginPath(); octx.arc(bx, by, 8, 0, Math.PI * 2); octx.fill(); octx.stroke();
+    }
+    octx.fillStyle = color; octx.strokeStyle = '#fff'; octx.lineWidth = 2;
+    octx.beginPath(); octx.arc(ax, ay, 9, 0, Math.PI * 2); octx.fill(); octx.stroke();
+    octx.font = '800 15px "Barlow Condensed", "Arial Narrow", sans-serif';
+    const tw = octx.measureText(label).width;
+    const lx = Math.min(Math.max(ax - tw / 2 - 6, 4), w - tw - 16), ly = ay > 34 ? ay - 32 : ay + 14;
+    octx.fillStyle = 'rgba(0,0,0,.7)'; octx.fillRect(lx, ly, tw + 12, 20);
+    octx.fillStyle = '#fff'; octx.fillText(label, lx + 6, ly + 15);
+  }
+  updateThresholdMarks();
+})();
+</script>
+</body>
+</html>
