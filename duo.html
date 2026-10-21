@@ -152,6 +152,11 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 }
 @media (prefers-reduced-motion: reduce) { .gate.flash { animation: none; } .meter i { transition: none; } }
 /* Two-device additions */
+.flashScreen { position: fixed; inset: 0; pointer-events: none; z-index: 20; opacity: 0; }
+.flashScreen.on { animation: fscr .7s ease-out; }
+@keyframes fscr { from { opacity: .55; } to { opacity: 0; } }
+.counts { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.soundBtn { padding: 8px 12px; font-size: 14px; }
 .brand span.duo { color: var(--go); }
 .conn { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
 .connTop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -172,6 +177,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 </style>
 </head>
 <body>
+<div class="flashScreen" id="flashScreen"></div>
 <div class="app">
   <header>
     <h1 class="brand">Race Timer <span class="duo">Duo</span></h1>
@@ -217,6 +223,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
         </div>
       </div>
       <div class="sync" id="syncLine" hidden></div>
+      <div class="counts" id="counts">Messages sent 0, received 0</div>
     </div>
 
     <div class="setupCard" id="setupCard" hidden>
@@ -287,12 +294,26 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     const l = $('log'); l.prepend(li); while (l.children.length > 8) l.lastChild.remove();
   }
   let actx = null;
+  function wakeAudio() {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state !== 'running') actx.resume();
+    } catch (e) {}
+  }
+  // iOS can pause page sound when the camera turns on or the screen is touched elsewhere; any touch wakes it.
+  document.addEventListener('pointerdown', wakeAudio, true);
+  document.addEventListener('touchend', wakeAudio, true);
   function beep(freq, dur = 0.12, when = 0) {
     if (!actx) return;
+    if (actx.state !== 'running') { try { actx.resume(); } catch (e) {} }
     const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
     o.type = 'square'; o.frequency.value = freq;
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function flash(colorVar) {
+    const f = $('flashScreen'); f.style.background = css(colorVar);
+    f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
   }
   function say(text) { try { if (!window.speechSynthesis) return; speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; speechSynthesis.speak(u); } catch (e) {} }
   let wakeLock = null;
@@ -305,7 +326,8 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   const PEER_PREFIX = 'brt-duo-';
   const Link = {
     open: false, onMsg: null, onState: null,
-    send(o) { if (this.open && this._send) { try { this._send(o); return true; } catch (e) {} } return false; },
+    sent: 0, got: 0,
+    send(o) { if (this.open && this._send) { try { this._send(o); if (o.type !== 'ping' && o.type !== 'pong') { this.sent++; showCounts(); } return true; } catch (e) {} } return false; },
     state(s, text) { this.open = s === 'ok'; this.onState && this.onState(s, text); }
   };
   function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.append(s); }); }
@@ -438,8 +460,11 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   let startPending = false;
   let cancelledUpTo = 0, lastStartSeq = 0;   // which phone starts have been cancelled (messages can arrive out of order)        // phone: a start was sent and the iPad has not finished or cancelled it
   const sentAt = new Map();
+  function showCounts() { $('counts').textContent = 'Messages sent ' + Link.sent + ', received ' + Link.got + (Link.last ? '. Last received: ' + Link.last : ''); }
+  const NAMES = { cross: 'start signal', beep: 'test beep', cancel: 'cancel', result: 'finish time', ack: 'start receipt', sync: 'clock check' };
   Link.onMsg = m => {
     if (!m || !m.type) return;
+    if (m.type !== 'ping' && m.type !== 'pong') { Link.got++; Link.last = NAMES[m.type] || m.type; showCounts(); }
     if (m.type === 'ping') Link.send({ type: 'pong', id: m.id, t0: m.t0, t1: clock() });
     else if (m.type === 'pong') {
       const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
@@ -458,7 +483,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       log('iPad got the start (' + Math.round(clock() - t) + ' ms round trip)');
     }
     else if (m.type === 'cancel') { if (role === 'finish') cancelledUpTo = Math.max(cancelledUpTo, m.upTo || 0); cancelRun(false); log('Run cancelled from the ' + (role === 'start' ? 'iPad' : 'phone')); }
-    else if (m.type === 'beep') { beep(660, 0.12); beep(990, 0.12, 0.15); log('Test beep from the ' + (role === 'start' ? 'iPad' : 'phone')); }
+    else if (m.type === 'beep') { flash('--amber'); beep(660, 0.12); beep(990, 0.12, 0.15); log('Test beep from the ' + (role === 'start' ? 'iPad' : 'phone')); }
     else if (m.type === 'result' && role === 'start') {
       startPending = false; $('stopBtn').hidden = true; $('runTime').textContent = m.s.toFixed(2);
       log('Finish! ' + m.s.toFixed(2) + ' s'); beep(880, 0.1); beep(1320, 0.16, 0.14);
@@ -474,10 +499,12 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     clearTimeout(runTimeout);
     runTimeout = setTimeout(() => { if (runStartAt !== null) { cancelRun(true); say('No finish. Run cancelled.'); log('No finish within 60 seconds, run cancelled'); } }, 60000);
     beep(1320, 0.14);
+    if (role === 'finish') { flash('--go'); setChip('Racing'); }
     if (role === 'finish') log('START from phone' + (seq ? ' (' + Math.round(clock() - t) + ' ms after the car crossed)' : ''));
   }
+  function setChip(text) { const c = $('modeChip'); c.textContent = text; }
   function cancelRun(tell) {
-    runStartAt = null; startPending = false; clearInterval(liveTimer); clearTimeout(runTimeout);
+    runStartAt = null; startPending = false; if (mode === 'test') setChip(role === 'finish' ? 'Finish' : 'Start'); clearInterval(liveTimer); clearTimeout(runTimeout);
     $('runTime').classList.remove('live'); $('runTime').textContent = '--.--'; $('stopBtn').hidden = true;
     if (tell) Link.send({ type: 'cancel', upTo: role === 'start' ? crossSeq : lastStartSeq });
   }
@@ -486,6 +513,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     const s = (t - runStartAt) / 1000;
     clearInterval(liveTimer); clearTimeout(runTimeout); runStartAt = null;
     const el = $('runTime'); el.classList.remove('live'); el.textContent = s.toFixed(2); $('stopBtn').hidden = true;
+    setChip('Finish'); flash('--stop');
     beep(880, 0.1); beep(1320, 0.16, 0.14);
     log('FINISH, test run ' + s.toFixed(2) + ' s');
     setTimeout(() => say(s.toFixed(2) + ' seconds'), 450);
@@ -501,7 +529,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     const card = $('gCard'); card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
     if (role === 'finish') { finishRun(t); return; }
     // Start phone: send the exact crossing moment, already converted to the iPad's clock.
-    beep(1320, 0.14);
+    beep(1320, 0.14); flash('--go');
     const seq = ++crossSeq;
     sentAt.set(seq, clock());
     const ok = Link.send({ type: 'cross', seq, t, tf: t + offset });
@@ -531,6 +559,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       $('err').hidden = false; return;
     }
     $('intro').hidden = true; $('panel').hidden = false; $('hdrRedo').hidden = false;
+    wakeAudio(); setTimeout(wakeAudio, 500);
     const isFinish = r === 'finish';
     $('gName').textContent = isFinish ? 'FINISH' : 'START';
     $('gCard').className = 'gate ' + (isFinish ? 'finish' : 'start');
