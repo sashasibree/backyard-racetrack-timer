@@ -735,19 +735,29 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
       }
       slots.push([from, idx.length]);
     }
-    return { idx: Int32Array.from(idx), slots, bg: new Float32Array(idx.length), cur: new Float32Array(idx.length),
+    return { idx: Int32Array.from(idx), slots, bg: new Float32Array(idx.length * 3), cur: new Float32Array(idx.length * 3),
              warm: 0, active: false, last: -1e9, level: 0, long: Math.max(DW, DH), cx, cw, ch, src: [x0 / sc, y0 / sc, cw / sc, ch / sc] };
   }
   function grab(d) { d.cx.drawImage(video, d.src[0], d.src[1], d.src[2], d.src[3], 0, 0, d.cw, d.ch); return d.cx.getImageData(0, 0, d.cw, d.ch).data; }
+  // Each pixel is compared on brightness AND colour, so a car that is about as bright as the
+  // track (for example a red car on blue) still shows up. Channels per pixel:
+  // L = brightness, A = red vs green, B = blue vs yellow.
   function analyse(d, px, now) {
     const { idx, bg, cur } = d, n = idx.length; let sum = 0;
-    for (let i = 0; i < n; i++) { const k = idx[i], v = (px[k] + 2 * px[k + 1] + px[k + 2]) * 0.25; cur[i] = v; sum += v - bg[i]; }
-    if (d.warm < 15) { const a = d.warm === 0 ? 1 : 0.3; for (let i = 0; i < n; i++) bg[i] += (cur[i] - bg[i]) * a; d.warm++; d.level = 0; return; }
-    const shift = sum / n, th = pixThresh();
+    for (let i = 0, j = 0; i < n; i++, j += 3) {
+      const k = idx[i], r = px[k], g = px[k + 1], b = px[k + 2];
+      cur[j] = (r + 2 * g + b) * 0.25; cur[j + 1] = r - g; cur[j + 2] = b - (r + g) * 0.5;
+      sum += cur[j] - bg[j];
+    }
+    if (d.warm < 15) { const a = d.warm === 0 ? 1 : 0.3; for (let j = 0; j < n * 3; j++) bg[j] += (cur[j] - bg[j]) * a; d.warm++; d.level = 0; return; }
+    const shift = sum / n, th = pixThresh(), thC = th * 1.2;
     let run = 0, best = 0, gap = 0;
     for (let s = 0; s < d.slots.length; s++) {
       const [from, to] = d.slots[s]; let c = 0;
-      for (let i = from; i < to; i++) if (Math.abs(cur[i] - bg[i] - shift) > th) c++;
+      for (let i = from; i < to; i++) {
+        const j = i * 3;
+        if (Math.abs(cur[j] - bg[j] - shift) > th || Math.hypot(cur[j + 1] - bg[j + 1], cur[j + 2] - bg[j + 2]) > thC) c++;
+      }
       if (to > from && c * 2 > (to - from)) { run += 1 + gap; gap = 0; if (run > best) best = run; }
       else if (run > 0 && gap < 2) gap++; else { run = 0; gap = 0; }
     }
@@ -755,7 +765,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     if (!d.active && level >= 1 && now - d.last > 800) { d.active = true; d.last = now; onCross(now); }
     else if (d.active && level < 0.4) d.active = false;
     const rate = level < 0.5 ? 0.05 : 0.003;
-    for (let i = 0; i < n; i++) bg[i] += (cur[i] - bg[i]) * rate;
+    for (let j = 0; j < n * 3; j++) bg[j] += (cur[j] - bg[j]) * rate;
   }
 
   // ---------- frame loop ----------
