@@ -333,6 +333,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   // One clock for everything on this device. (__skew lets a test pretend two devices disagree.)
   const clock = () => performance.now() + (window.__skew || 0);
   const LOOPBACK = location.hash === '#loopback';
+  const RELAY_TEST = location.hash === '#relaytest';   // tests: direct link never opens, relay is simulated
 
   let role = null;                 // 'start' | 'finish'
   let mode = 'off';                // off | setup | test
@@ -410,15 +411,115 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     Link.open = true; Link._send({ type: 'hello' }); Link.state('ok', 'Connected to the finish device');
   }
 
+  // ---------- backup route (relay) ----------
+  // Some routers stop two phones from opening a direct link (often an Android and an iPhone).
+  // Then both devices talk through a free public message relay (MQTT over a secure web socket).
+  // Messages are only signals and times. Wi-Fi delay does not affect results because the start
+  // device sends timestamps on the finish device's clock.
+  const RELAY_BROKERS = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt'];
+  const RELAY_ROOT = 'sashasibree-brt-duo/';
+  let relay = null, relayActive = false, relayBroker = 0, relayStarting = false, helloTimer = null;
+  async function loadMqtt() {
+    if (window.mqtt) return;
+    for (const src of ['https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js', 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js', 'https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js']) {
+      try { await loadScript(src); if (window.mqtt) return; } catch (e) {}
+    }
+    throw new Error('mqtt-load');
+  }
+  // Opens the relay and listens on this device's inbox. Resolves to { publish(box, obj), close() }.
+  async function relayOpen(code, inbox, onMsg) {
+    if (RELAY_TEST) {
+      const bc = new BroadcastChannel('relay-' + code);
+      bc.onmessage = e => { if (e.data.box === inbox) setTimeout(() => onMsg(e.data.o), 30 + Math.random() * 120); };
+      return { publish: (box, o) => bc.postMessage({ box, o }), close: () => bc.close() };
+    }
+    await loadMqtt();
+    for (let attempt = 0; attempt < RELAY_BROKERS.length; attempt++) {
+      const url = RELAY_BROKERS[relayBroker % RELAY_BROKERS.length];
+      try {
+        return await new Promise((res, rej) => {
+          const c = mqtt.connect(url, { clientId: 'brt-' + Math.random().toString(16).slice(2, 10), clean: true, connectTimeout: 6000, reconnectPeriod: 2000 });
+          let done = false;
+          const t = setTimeout(() => { if (!done) { done = true; try { c.end(true); } catch (e) {} rej(new Error('timeout')); } }, 7000);
+          c.on('connect', () => {
+            c.subscribe(RELAY_ROOT + code + '/' + inbox, { qos: 0 });
+            if (!done) { done = true; clearTimeout(t);
+              res({ publish: (box, o) => c.publish(RELAY_ROOT + code + '/' + box, JSON.stringify(o), { qos: 0 }), close: () => { try { c.end(true); } catch (e) {} } }); }
+          });
+          c.on('message', (topic, payload) => { try { onMsg(JSON.parse(payload.toString())); } catch (e) {} });
+          c.on('error', () => {});
+        });
+      } catch (e) { relayBroker++; }
+    }
+    throw new Error('relay-unreachable');
+  }
+  // Finish device: always listens on the relay too, so the start device can reach it either way.
+  async function finishRelay(code) {
+    if (relay) { relay.close(); relay = null; }
+    try {
+      relay = await relayOpen(code, 'to-finish', o => {
+        if (o.type === 'hello') {
+          relay.publish('to-start', { type: 'welcome' });
+          if (!relayActive) {
+            relayActive = true;
+            if (conn) { try { conn.close(); } catch (e) {} conn = null; }
+            Link._send = m => relay.publish('to-start', m);
+            Link.state('ok', 'Connected to the start device (backup route)');
+          }
+          return;
+        }
+        if (relayActive) Link.onMsg && Link.onMsg(o);
+      });
+    } catch (e) { /* relay unreachable: the direct link may still work */ }
+  }
+  // Start device: used when the direct link has not opened after a few seconds.
+  async function startRelay(code) {
+    if (relayActive || relayStarting) return;
+    relayStarting = true;
+    Link.state('wait', 'Direct link blocked by the network. Trying the backup route.');
+    try {
+      if (relay) { relay.close(); relay = null; }
+      relay = await relayOpen(code, 'to-start', o => {
+        if (o.type === 'welcome') {
+          if (!relayActive) {
+            relayActive = true; clearInterval(helloTimer); clearTimeout(joinTimer); clearTimeout(fallbackTimer);
+            if (conn) { try { conn.close(); } catch (e) {} conn = null; }
+            Link._send = m => relay.publish('to-finish', m);
+            Link.state('ok', 'Connected to the finish device (backup route)');
+          }
+          return;
+        }
+        if (relayActive) Link.onMsg && Link.onMsg(o);
+      });
+      const hello = () => relay && relay.publish('to-finish', { type: 'hello' });
+      hello(); clearInterval(helloTimer);
+      helloTimer = setInterval(() => { if (!relayActive) hello(); else clearInterval(helloTimer); }, 2000);
+      setTimeout(() => { if (!relayActive && !Link.open) Link.state('bad', 'Finish device not answering. Check the code, and that its screen shows ' + code + '.'); }, 12000);
+    } catch (e) {
+      Link.state('bad', 'Could not reach the backup route either. Check the internet connection, then tap Connect again.');
+    }
+    relayStarting = false;
+  }
+  function relayLost() {
+    // No answers over the relay: the finish device may have reloaded. Say hello again.
+    if (!relayActive) return;
+    relayActive = false;
+    Link.state('bad', 'Lost the finish device. Reconnecting.');
+    if (role === 'start' && joinCode) startRelay(joinCode);
+  }
+
   // Finish iPad: registers under its pairing code and waits for the phone.
   let peer = null, conn = null, hostTries = 0;
   async function host(code) {
     if (LOOPBACK) return loopbackHost(code);
+    finishRelay(code);
+    if (RELAY_TEST) { Link.state('wait', 'Waiting for the start device'); return; }
     Link.state('wait', 'Connecting to the pairing service');
-    try { await loadPeer(); } catch (e) { Link.state('bad', 'Could not load the pairing tool. Check the internet connection and reload.'); return; }
+    try { await loadPeer(); } catch (e) { Link.state('wait', 'Waiting for the start device'); return; }
     peer = new Peer(PEER_PREFIX + code, { debug: 1 });
     peer.on('open', () => { hostTries = 0; Link.state('wait', 'Waiting for the start device'); });
     peer.on('connection', c => {
+      if (relayActive) { try { c.close(); } catch (e) {} return; }
       if (conn && conn.open) conn.close();
       conn = c; wireConn(c, 'Connected to the start device');
     });
@@ -428,7 +529,7 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
         // The code is still held from a moment ago (for example after a reload). Retry, then pick a new code.
         peer.destroy();
         if (++hostTries <= 4) { Link.state('wait', 'Reclaiming code ' + code); setTimeout(() => host(code), 2500); }
-        else { hostTries = 0; const c2 = newCode(); setTimeout(() => host(c2), 200); }
+        else { hostTries = 0; const c2 = newCode(); setTimeout(() => host(c2), 200); }   // host() also moves the relay to the new code
       } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
         Link.state('bad', 'Lost the pairing service. Retrying.');
         setTimeout(() => { try { peer.reconnect(); } catch (e) {} }, 3000);
@@ -436,12 +537,19 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     });
   }
   // Start phone: connects to the iPad's code and keeps retrying if the link drops.
-  let joinCode = null, joinTimer = null;
+  let joinCode = null, joinTimer = null, fallbackTimer = null;
   async function join(code) {
+    if (relayActive) return;
+    const fresh = code !== joinCode;
     joinCode = code; store.set('duo.joinCode', code);
     if (LOOPBACK) return loopbackJoin(code);
+    if (fresh || !fallbackTimer) {
+      clearTimeout(fallbackTimer);
+      fallbackTimer = setTimeout(() => { fallbackTimer = null; if (!Link.open) startRelay(code); }, RELAY_TEST ? 2000 : 6000);
+    }
     Link.state('wait', 'Looking for the finish device with code ' + code);
-    try { await loadPeer(); } catch (e) { Link.state('bad', 'Could not load the pairing tool. Check the internet connection and reload.'); return; }
+    if (RELAY_TEST) return;
+    try { await loadPeer(); } catch (e) { startRelay(code); return; }
     const go = () => {
       const c = peer.connect(PEER_PREFIX + code, { reliable: true });
       conn = c; wireConn(c, 'Connected to the finish device');
@@ -452,17 +560,17 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
     peer.on('open', go);
     peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
     peer.on('error', err => {
-      if (err.type === 'peer-unavailable') Link.state('bad', 'No finish device found with code ' + code + '. Check the code on its screen.');
-      else Link.state('bad', 'Connection problem (' + err.type + '). Retrying.');
-      retryJoin();
+      if (relayActive || relayStarting) return;
+      // The direct route failed; the backup route may still reach the finish device.
+      startRelay(code);
     });
   }
-  function retryJoin() { clearTimeout(joinTimer); if (joinCode) joinTimer = setTimeout(() => { if (!Link.open) join(joinCode); }, 4000); }
+  function retryJoin() { clearTimeout(joinTimer); if (joinCode && !relayActive) joinTimer = setTimeout(() => { if (!Link.open && !relayActive) join(joinCode); }, 4000); }
   function wireConn(c, okText) {
-    Link._send = o => c.send(o);
-    c.on('open', () => { Link.state('ok', okText); });
+    Link._send = o => { if (!relayActive) c.send(o); };
+    c.on('open', () => { if (relayActive) { try { c.close(); } catch (e) {} return; } clearTimeout(fallbackTimer); fallbackTimer = null; Link.state('ok', okText); });
     c.on('data', d => Link.onMsg && Link.onMsg(d));
-    c.on('close', () => { if (c === conn) { Link.state('bad', 'Disconnected. Reconnecting.'); if (role === 'start') retryJoin(); else Link.state('wait', 'Waiting for the start device'); } });
+    c.on('close', () => { if (c === conn && !relayActive) { Link.state('bad', 'Disconnected. Reconnecting.'); if (role === 'start') retryJoin(); else Link.state('wait', 'Waiting for the start device'); } });
     c.on('error', () => {});
   }
   function newCode() { const c = String(1000 + Math.floor(Math.random() * 9000)); store.set('duo.hostCode', c); $('codeShow').textContent = c; return c; }
@@ -496,8 +604,9 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   }
   async function syncClocks() {
     const samples = [];
-    for (let i = 0; i < 12 && Link.open; i++) { const s = await ping(); if (s) samples.push(s); await new Promise(r => setTimeout(r, 60)); }
-    if (!samples.length) return;
+    const rounds = relayActive ? 20 : 12;
+    for (let i = 0; i < rounds && Link.open; i++) { const s = await ping(); if (s) samples.push(s); await new Promise(r => setTimeout(r, 60)); }
+    if (!samples.length) { relayLost(); return; }
     samples.sort((a, b) => a.rtt - b.rtt);
     const best = samples[0];
     // Keep the previous estimate if this round was noisier.
@@ -744,6 +853,8 @@ button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
   $('joinBtn').addEventListener('click', () => {
     const c = $('codeIn').value.replace(/\D/g, '');
     if (c.length !== 4) { Link.state('bad', 'The code has 4 digits'); return; }
+    if (c !== joinCode) { relayActive = false; if (relay) { relay.close(); relay = null; } }
+    clearTimeout(fallbackTimer); fallbackTimer = null;
     join(c);
   });
   if (store.get('duo.role', null) === 'start') { $('roleStart').classList.add('primary'); $('roleFinish').classList.remove('primary'); }
